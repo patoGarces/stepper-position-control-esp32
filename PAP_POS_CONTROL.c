@@ -2,24 +2,20 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
-#include "driver/timer.h"
+#include "driver/gptimer.h"
 
 #define TIMER_GROUP_MOTOR   TIMER_GROUP_0
 #define TIMER_NUM_MOTOR     TIMER_0
 /* Cantidad de ticks hasta que se dispare la interrupcion */
-#define MOTOR_PERIOD_US     10
-
-
-// uint16_t                outputVelUs = MIN_VELOCITY_US;      // Periodo de cada pulso en us/10
-// uint16_t                outputVelContUs = 0;
+#define MOTOR_PERIOD_US     500
 
 motors_control_t    outputMotors;
 
-static bool IRAM_ATTR timerInterrupt(void * args) {
+static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx) {
     uint8_t motor;
     BaseType_t high_task_awoken = pdFALSE;
 
-    if(outputMotors.motorVelContUs < outputMotors.motorVelUs){
+    if(outputMotors.motorVelContUs < outputMotors.motorVelUs){          // TODO: eliminar esta logica, manejar la velocidad con el periodo de la alarma
         outputMotors.motorVelContUs++;
     }
     else{
@@ -33,7 +29,7 @@ static bool IRAM_ATTR timerInterrupt(void * args) {
                     gpio_set_level(outputMotors.motorsGpio.motors[motor].stepPin,outputMotors.motorsControl[motor].flagToggle);
                     outputMotors.motorsControl[motor].flagToggle = !outputMotors.motorsControl[motor].flagToggle;  
                 }
-                else{
+                else{                                                           // TODO: encolar las solicitudes de moveAxis, aca cargar el siguiente movimiento
                     outputMotors.motorsControl[motor].flagEnable = false;
                 }
             }
@@ -54,6 +50,7 @@ void setControlPins(uint8_t outputMotor,uint8_t enablePin,uint8_t stepPin,uint8_
     gpio_set_direction( outputMotors.motorsGpio.motors[outputMotor].stepPin = stepPin,GPIO_MODE_OUTPUT );
 }
 
+
 void initMotors(void){
 
     outputMotors.motorVelContUs = 0;
@@ -61,25 +58,35 @@ void initMotors(void){
     setVel(outputMotors.motorVelPercent);                   // inician los motores con la velocidad default
     setDisableMotors();                                     // Inician los motores deshabilitados
 
+     gptimer_handle_t handleTimer = NULL;
 
-    /*Inicializo el timer encargado de generar los pulsos para cada motor*/
-    timer_config_t timer = {
-        .auto_reload = TIMER_AUTORELOAD_EN,
-        .divider = 80,                                      // 80mhz / 80 = 1MHZ = 1us      <- Resolucion de cada tick del timer
-        .counter_dir = TIMER_COUNT_UP,
-        .counter_en = TIMER_PAUSE,
-        .alarm_en = TIMER_ALARM_EN,
+    gptimer_config_t timerConfig = {
+
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = 1000000,
     };
 
-    timer_init(TIMER_GROUP_MOTOR,TIMER_NUM_MOTOR,&timer);
-    timer_set_alarm_value(TIMER_GROUP_MOTOR,TIMER_NUM_MOTOR, MOTOR_PERIOD_US);      // Desborde de interrupcion: 1us de cada tick * MOTOR_PERIOD_US = 10us
-    timer_isr_callback_add(TIMER_GROUP_MOTOR,TIMER_NUM_MOTOR,timerInterrupt,NULL, ESP_INTR_FLAG_IRAM );
-    timer_set_counter_value(TIMER_GROUP_MOTOR,TIMER_NUM_MOTOR,0);
-    timer_enable_intr(TIMER_GROUP_MOTOR, TIMER_NUM_MOTOR);
-    timer_start(TIMER_GROUP_MOTOR,TIMER_NUM_MOTOR);
+    ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimer));
+    
+    gptimer_alarm_config_t alarmMpu ={
+        .alarm_count = MOTOR_PERIOD_US,      // Desborde de interrupcion: 1us de cada tick * MOTOR_PERIOD_US = 10us
+        .reload_count = 0,
+        .flags.auto_reload_on_alarm = true,
+    };
+
+    ESP_ERROR_CHECK(gptimer_set_alarm_action(handleTimer,&alarmMpu));
+    
+    gptimer_event_callbacks_t newCallback ={
+        .on_alarm = timerInterrupt,
+    };
+
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimer,&newCallback,NULL));
+    ESP_ERROR_CHECK(gptimer_enable(handleTimer));
+    ESP_ERROR_CHECK(gptimer_start(handleTimer));
 }
 
-void moveAxis(uint8_t motor,uint8_t dir,uint32_t steps,uint16_t duration){
+void moveAxis(uint8_t motor,uint8_t dir,uint32_t steps,uint16_t duration){          // TODO: encolar estas solicitudes en una estructura de tipo motor_control_t
     
     outputMotors.motorsControl[motor].dir = dir;
     outputMotors.motorsControl[motor].durationMs = duration;

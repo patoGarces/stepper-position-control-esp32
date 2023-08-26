@@ -28,7 +28,7 @@ static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm
 
             if(outputMotors.motorsControl[motor].flagRunning){
                 if(outputMotors.motorsControl[motor].contMotor < outputMotors.motorsControl[motor].stepsMotor){
-                    
+
                     outputMotors.motorsControl[motor].contMotor++;
                     gpio_set_level(outputMotors.motorsGpio.motors[motor].stepPin,outputMotors.motorsControl[motor].flagToggle);
                     outputMotors.motorsControl[motor].flagToggle = !outputMotors.motorsControl[motor].flagToggle;  
@@ -57,7 +57,10 @@ static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm
 
 static void handlerQueueAxis(void *pvParameters){
 
-    new_movement_motor_t receiveNewMovement;
+    // new_movement_motor_t receiveNewMovement;
+    motor_control_t receiveNewMovement[3];
+    uint8_t motor;
+
 
     handleMoveAxis = xQueueCreate(100,sizeof(motors_control_t));
     // handleSyncMovement = xSemaphoreCreateBinary();
@@ -74,8 +77,10 @@ static void handlerQueueAxis(void *pvParameters){
                 ( void * ) &receiveNewMovement,
                 1)){
 
-                outputMotors.motorsControl[receiveNewMovement.motor] = receiveNewMovement.movement;
-                gpio_set_level(outputMotors.motorsGpio.motors[receiveNewMovement.motor].dirPin,receiveNewMovement.movement.dir); 
+                for( motor = 0; motor < 3; motor++ ){
+                    outputMotors.motorsControl[motor] = receiveNewMovement[motor];
+                    gpio_set_level(outputMotors.motorsGpio.motors[motor].dirPin,outputMotors.motorsControl[motor].dir); 
+                }
             }
         }
         vTaskDelay(pdMS_TO_TICKS(1));
@@ -132,16 +137,34 @@ void initMotors(void){
     xTaskCreate(handlerQueueAxis,"axis Handler",2048,NULL,4,NULL);
 }
 
-void moveAxis(uint8_t motor,uint8_t dir,uint32_t steps,uint16_t duration){          // TODO: encolar estas solicitudes en una estructura de tipo motor_control_t
+void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC,uint16_t duration){          // TODO: encolar estas solicitudes en una estructura de tipo motor_control_t
     
-    new_movement_motor_t newMovement;
+    // new_movement_motor_t newMovement;
+    motor_control_t newMovement[3];
 
-    newMovement.motor = motor;
-    newMovement.movement.dir = dir;
-    newMovement.movement.durationMs = duration;
-    newMovement.movement.stepsMotor = steps*2;             // Multiplico por 2 ya que son pulsos, y yo cuento cambios de estado en el pin
-    newMovement.movement.contMotor = 0;
-    newMovement.movement.flagRunning = true;
+    // newMovement.movement.dir = dir;
+    // newMovement.movement.durationMs = duration;
+    // newMovement.movement.stepsMotor = steps*2;             // Multiplico por 2 ya que son pulsos, y yo cuento cambios de estado en el pin
+    // newMovement.movement.contMotor = 0;
+    // newMovement.movement.flagRunning = true;
+
+    newMovement[MOTOR_A].dir = dirA;
+    newMovement[MOTOR_A].durationMs = duration;
+    newMovement[MOTOR_A].stepsMotor = stepsA *2;
+    newMovement[MOTOR_A].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
+    newMovement[MOTOR_A].flagRunning = true;
+
+    newMovement[MOTOR_B].dir = dirB;
+    newMovement[MOTOR_B].durationMs = duration;
+    newMovement[MOTOR_B].stepsMotor = stepsB *2;
+    newMovement[MOTOR_B].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
+    newMovement[MOTOR_B].flagRunning = true;
+
+    newMovement[MOTOR_C].dir = dirC;
+    newMovement[MOTOR_C].durationMs = duration;
+    newMovement[MOTOR_C].stepsMotor = stepsC *2;
+    newMovement[MOTOR_C].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
+    newMovement[MOTOR_C].flagRunning = true;
 
     xQueueSend(handleMoveAxis,&newMovement,0);
     printf("Nuevo movimiento agregado a la cola,pendientes: %d\n",uxQueueMessagesWaiting( handleMoveAxis )); 

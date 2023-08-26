@@ -39,10 +39,9 @@ typedef struct{
     uint8_t     flagToggle;
 }motor_control_t;
 
-typedef struct{
-    uint8_t motor;
-    motor_control_t movement;
-}new_movement_motor_t;
+// typedef struct{
+//     motor_control_t movements[3];
+// }new_movement_motor_t;
 
 typedef struct{
     uint8_t                 motorVelPercent;
@@ -55,7 +54,7 @@ typedef struct{
 
 void setControlPins(uint8_t outputMotor,uint8_t enablePin,uint8_t stepPin,uint8_t dirPin);
 void initMotors(void);
-void moveAxis(uint8_t output,uint8_t dir,uint32_t steps,uint16_t duration);
+void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC,uint16_t duration);
 void setVel(uint8_t velocity);
 void setEnableMotors(void);
 void setDisableMotors(void);

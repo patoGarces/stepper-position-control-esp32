@@ -2,6 +2,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "driver/gpio.h"
 #include "driver/gptimer.h"
 
@@ -11,11 +12,8 @@
 #define MOTOR_PERIOD_US     45
 
 QueueHandle_t       handleMoveAxis;
+SemaphoreHandle_t   handleSyncMovement;
 motors_control_t    outputMotors;
-
-bool finishMovement[3] = {false,false,false};
-
-int16_t absolutePosition[3] = {0,0,0};
 
 static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx) {
     uint8_t motor;
@@ -27,33 +25,30 @@ static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm
     else{
         outputMotors.motorVelContUs = 0;
         for(motor=0;motor<3;motor++){
-            // motor=0;
 
-            if(outputMotors.motorsControl[motor].flagEnable){
+            if(outputMotors.motorsControl[motor].flagRunning){
                 if(outputMotors.motorsControl[motor].contMotor < outputMotors.motorsControl[motor].stepsMotor){
+                    
                     outputMotors.motorsControl[motor].contMotor++;
-
                     gpio_set_level(outputMotors.motorsGpio.motors[motor].stepPin,outputMotors.motorsControl[motor].flagToggle);
-                    
-                    // GPIO.out_w1ts.data = 1 << actualMovement.motorsGpio.motors[motor].stepPin; // high
-                    // GPIO.out_w1tc.data = 1 << actualMovement.motorsGpio.motors[motor].stepPin; // low
-
-                    if(outputMotors.motorsControl[motor].dir){
-                        absolutePosition[motor]++;
-                    }
-                    else{
-                        absolutePosition[motor]--;
-                    }
-                    
                     outputMotors.motorsControl[motor].flagToggle = !outputMotors.motorsControl[motor].flagToggle;  
                 }
-                else{                                                           // TODO: encolar las solicitudes de moveAxis, aca cargar el siguiente movimiento
-                    outputMotors.motorsControl[motor].flagEnable = false;
+                else{ 
+                    outputMotors.motorsControl[motor].flagRunning = false;
                 }
             }
-            else{
-                finishMovement[motor] = true; // TODO: contemplar el encolado de cada motor por separado
-            }
+        //     else{
+        //         finishMovement[motor] = true;
+
+        //         // if( finishMovement[0] && finishMovement[1] && finishMovement[2]){
+        //         //     // xSemaphoreGiveFromISR(handleSyncMovement,1);
+        //         //     // superFinishMovement = true;
+        //         // }
+        //     }
+        // }
+        // if( finishMovement[0] && finishMovement[1] && finishMovement[2]){
+        //     // xSemaphoreGiveFromISR(handleSyncMovement,1);
+        //     superFinishMovement = true;
         }
     }
         
@@ -63,28 +58,24 @@ static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm
 static void handlerQueueAxis(void *pvParameters){
 
     new_movement_motor_t receiveNewMovement;
-    handleMoveAxis = xQueueCreate(100,sizeof(motors_control_t));
 
-    printf("handlerQueueAxis task created\n");
+    handleMoveAxis = xQueueCreate(100,sizeof(motors_control_t));
+    // handleSyncMovement = xSemaphoreCreateBinary();
 
     while(1){
 
-        if(xQueueReceive( handleMoveAxis,
+        // if( xSemaphoreTake(handleSyncMovement,1 )){
+        if( !outputMotors.motorsControl[MOTOR_A].flagRunning &&
+            !outputMotors.motorsControl[MOTOR_B].flagRunning &&
+            !outputMotors.motorsControl[MOTOR_C].flagRunning ) {
+             
+            vTaskDelay(pdMS_TO_TICKS(200));                         // TODO: solo para debug, BORRAR
+            if(xQueueReceive( handleMoveAxis,
                 ( void * ) &receiveNewMovement,
                 1)){
-    
-            vTaskDelay(pdMS_TO_TICKS(200)); 
-            if(finishMovement[receiveNewMovement.motor]){
-                finishMovement[receiveNewMovement.motor] = false;
+
                 outputMotors.motorsControl[receiveNewMovement.motor] = receiveNewMovement.movement;
-
-                gpio_set_level(outputMotors.motorsGpio.motors[receiveNewMovement.motor].dirPin,receiveNewMovement.movement.dir);
-
-                printf("AbsolutePosition: %d: %d\n",receiveNewMovement.motor,absolutePosition[receiveNewMovement.motor]);
-                printf("Nuevo movimiento cargado al timer: motor %d,pasos: %ld\n",receiveNewMovement.motor,receiveNewMovement.movement.stepsMotor); 
-            }
-            else{                                           // Si el motor aun esta trabajando, cargo el movimiento al final de la cola
-                xQueueSend(handleMoveAxis,&receiveNewMovement,0);
+                gpio_set_level(outputMotors.motorsGpio.motors[receiveNewMovement.motor].dirPin,receiveNewMovement.movement.dir); 
             }
         }
         vTaskDelay(pdMS_TO_TICKS(1));
@@ -150,19 +141,10 @@ void moveAxis(uint8_t motor,uint8_t dir,uint32_t steps,uint16_t duration){      
     newMovement.movement.durationMs = duration;
     newMovement.movement.stepsMotor = steps*2;             // Multiplico por 2 ya que son pulsos, y yo cuento cambios de estado en el pin
     newMovement.movement.contMotor = 0;
-    newMovement.movement.flagEnable = true;
+    newMovement.movement.flagRunning = true;
 
-
-    printf("Movimientos pendientes: %d\n",uxQueueMessagesWaiting( handleMoveAxis ));
     xQueueSend(handleMoveAxis,&newMovement,0);
-
-    printf("Nuevo movimiento agregado a la cola\n"); 
-
-    // outputMotors.motorsControl[motor].dir = dir;
-    // outputMotors.motorsControl[motor].durationMs = duration;
-    // outputMotors.motorsControl[motor].stepsMotor = steps*2;             // Multiplico por 2 ya que son pulsos, y yo cuento cambios de estado en el pin
-    // outputMotors.motorsControl[motor].contMotor = 0;
-    // outputMotors.motorsControl[motor].flagEnable = true;
+    printf("Nuevo movimiento agregado a la cola,pendientes: %d\n",uxQueueMessagesWaiting( handleMoveAxis )); 
 }
 
 void setVel(uint8_t velocity){

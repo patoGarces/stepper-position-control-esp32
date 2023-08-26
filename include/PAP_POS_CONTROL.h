@@ -35,16 +35,14 @@ typedef struct{
     uint32_t    stepsMotor;
     uint16_t    durationMs;
     uint8_t     dir;
-    uint8_t     flagEnable;
+    uint8_t     flagRunning;
     uint8_t     flagToggle;
 }motor_control_t;
-
 
 typedef struct{
     uint8_t motor;
     motor_control_t movement;
 }new_movement_motor_t;
-
 
 typedef struct{
     uint8_t                 motorVelPercent;

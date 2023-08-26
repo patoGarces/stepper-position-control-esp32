@@ -41,6 +41,12 @@ typedef struct{
 
 
 typedef struct{
+    uint8_t motor;
+    motor_control_t movement;
+}new_movement_motor_t;
+
+
+typedef struct{
     uint8_t                 motorVelPercent;
     uint16_t                motorVelUs;
     uint16_t                motorVelContUs;

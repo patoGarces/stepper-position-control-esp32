@@ -9,11 +9,12 @@
 #define TIMER_GROUP_MOTOR   TIMER_GROUP_0
 #define TIMER_NUM_MOTOR     TIMER_0
 /* Cantidad de ticks hasta que se dispare la interrupcion */
-#define MOTOR_PERIOD_US     45
+#define MOTOR_PERIOD_US     5
 
 QueueHandle_t       handleMoveAxis;
 SemaphoreHandle_t   handleSyncMovement;
 motors_control_t    outputMotors;
+control_ramp_t      rampMotors;
 
 static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx) {
     uint8_t motor;
@@ -32,32 +33,83 @@ static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm
                     outputMotors.motorsControl[motor].contMotor++;
                     gpio_set_level(outputMotors.motorsGpio.motors[motor].stepPin,outputMotors.motorsControl[motor].flagToggle);
                     outputMotors.motorsControl[motor].flagToggle = !outputMotors.motorsControl[motor].flagToggle;  
+
+                    rampHandler(motor,outputMotors.motorsControl[motor].contMotor,outputMotors.motorsControl[motor].stepsMotor);
                 }
                 else{ 
                     outputMotors.motorsControl[motor].flagRunning = false;
                 }
             }
-        //     else{
-        //         finishMovement[motor] = true;
-
-        //         // if( finishMovement[0] && finishMovement[1] && finishMovement[2]){
-        //         //     // xSemaphoreGiveFromISR(handleSyncMovement,1);
-        //         //     // superFinishMovement = true;
-        //         // }
-        //     }
-        // }
-        // if( finishMovement[0] && finishMovement[1] && finishMovement[2]){
-        //     // xSemaphoreGiveFromISR(handleSyncMovement,1);
-        //     superFinishMovement = true;
         }
     }
         
     return (high_task_awoken == pdTRUE);
 }
 
+void setRampa(uint8_t velFinal){
+
+    rampMotors.actualVel = 10;    
+    rampMotors.targetVel = velFinal;     
+    setVel(1);
+    rampMotors.stateRamp = RAMP_UP;
+    
+    rampMotors.distRampSteps[0] = outputMotors.motorsControl[0].stepsMotor * 0.3; // TODO: hacer constante la distancia de rampa
+
+    rampMotors.period = rampMotors.distRampSteps[0]/100;                   // el periodo es la distancia seteada pasada a pasos, dividido el 100% de velocidad total
+    
+    if(rampMotors.period == 0){
+      rampMotors.period = 1;
+    }
+}
+
+void rampHandler(uint8_t motor, uint32_t actualCont, uint32_t totalSteps){
+
+    switch( rampMotors.stateRamp ){
+
+    case RAMP_UP:
+      
+    //   if( motor.countSteps < rampa.distRampaSteps){           // dentro de la rampa de subida, debo chequear si no me estoy solapando con la rampa de bajada
+    //     rampa.stateRampa = RAMPA_BAJADA;
+    //   }
+      
+      if(( actualCont % rampMotors.period) == 0){
+        
+        if( rampMotors.actualVel < rampMotors.targetVel){
+          rampMotors.actualVel++;
+          setVel( rampMotors.actualVel ); 
+        }
+        else{
+          rampMotors.stateRamp = RAMP_MESETA;
+        }
+      }
+    break;
+
+    case RAMP_MESETA:
+
+        if( actualCont > ( outputMotors.motorsControl[0].stepsMotor - rampMotors.distRampSteps[0])){
+            rampMotors.stateRamp = RAMP_DOWN;
+        }
+
+    break;
+
+    case RAMP_DOWN:
+
+        if(( actualCont % rampMotors.period) == 0){
+
+            if( rampMotors.actualVel > 1){
+                rampMotors.actualVel--;
+                setVel( rampMotors.actualVel ); 
+            }
+            else{
+                rampMotors.stateRamp = RAMP_MESETA;
+            }
+        }
+    break;
+  }
+}
+
 static void handlerQueueAxis(void *pvParameters){
 
-    // new_movement_motor_t receiveNewMovement;
     motor_control_t receiveNewMovement[3];
     uint8_t motor;
 
@@ -81,6 +133,8 @@ static void handlerQueueAxis(void *pvParameters){
                     outputMotors.motorsControl[motor] = receiveNewMovement[motor];
                     gpio_set_level(outputMotors.motorsGpio.motors[motor].dirPin,outputMotors.motorsControl[motor].dir); 
                 }
+
+                setRampa(100);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(1));
@@ -139,14 +193,7 @@ void initMotors(void){
 
 void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC,uint16_t duration){          // TODO: encolar estas solicitudes en una estructura de tipo motor_control_t
     
-    // new_movement_motor_t newMovement;
     motor_control_t newMovement[3];
-
-    // newMovement.movement.dir = dir;
-    // newMovement.movement.durationMs = duration;
-    // newMovement.movement.stepsMotor = steps*2;             // Multiplico por 2 ya que son pulsos, y yo cuento cambios de estado en el pin
-    // newMovement.movement.contMotor = 0;
-    // newMovement.movement.flagRunning = true;
 
     newMovement[MOTOR_A].dir = dirA;
     newMovement[MOTOR_A].durationMs = duration;
@@ -177,7 +224,7 @@ void setVel(uint8_t velocity){
         outputMotors.motorVelUs = MAX_VELOCITY_US + (((MIN_VELOCITY_US-MAX_VELOCITY_US)*(100-velocity))/100);
         outputMotors.motorVelUs /= 10;
 
-        printf("VelMinUs: %dus,VelMaxUs: %dus,velocity: %d%%,salida: %d\n",MIN_VELOCITY_US,MAX_VELOCITY_US,velocity,outputMotors.motorVelUs);
+        // printf("VelMinUs: %dus,VelMaxUs: %dus,velocity: %d%%,salida: %d\n",MIN_VELOCITY_US,MAX_VELOCITY_US,velocity,outputMotors.motorVelUs);
     }
 }
 

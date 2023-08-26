@@ -20,6 +20,12 @@ enum motor_name {
     MOTOR_C
 };
 
+enum ramp_state {
+    RAMP_UP,
+    RAMP_MESETA,
+    RAMP_DOWN
+};
+
 typedef struct{
     uint8_t stepPin;
     uint8_t dirPin;
@@ -39,10 +45,6 @@ typedef struct{
     uint8_t     flagToggle;
 }motor_control_t;
 
-// typedef struct{
-//     motor_control_t movements[3];
-// }new_movement_motor_t;
-
 typedef struct{
     uint8_t                 motorVelPercent;
     uint16_t                motorVelUs;
@@ -52,6 +54,15 @@ typedef struct{
     motor_control_t         motorsControl[CANT_MOTORS];
 }motors_control_t;
 
+typedef struct{
+    uint8_t  stateRamp;
+    uint8_t  actualVel;
+    uint8_t  targetVel;
+    uint32_t distRampSteps[3];
+    uint16_t period;
+
+}control_ramp_t;
+
 void setControlPins(uint8_t outputMotor,uint8_t enablePin,uint8_t stepPin,uint8_t dirPin);
 void initMotors(void);
 void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC,uint16_t duration);
@@ -59,3 +70,6 @@ void setVel(uint8_t velocity);
 void setEnableMotors(void);
 void setDisableMotors(void);
 uint8_t getVelPercent(void);
+
+void rampHandler(uint8_t motor, uint32_t actualCont, uint32_t totalSteps);
+void setRampa(uint8_t velFinal);

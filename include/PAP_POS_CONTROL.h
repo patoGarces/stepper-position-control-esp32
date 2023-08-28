@@ -1,8 +1,8 @@
 #include "stdint.h"
 
 #define NO_DURATION     -1
-#define MIN_VELOCITY_US 2000
-#define MAX_VELOCITY_US 500     
+#define MIN_VELOCITY_US 3000
+#define MAX_VELOCITY_US 800     
 
 #define VEL_PERCENT_DEFAULT 10  // velocidad por defecto al iniciar los motores
 
@@ -47,8 +47,6 @@ typedef struct{
 
 typedef struct{
     uint8_t                 motorVelPercent;
-    uint16_t                motorVelUs;
-    uint16_t                motorVelContUs;
     uint8_t                 motorsEnable;
     output_motors_pins_t    motorsGpio;
     motor_control_t         motorsControl[CANT_MOTORS];
@@ -60,7 +58,6 @@ typedef struct{
     uint8_t  targetVel;
     uint32_t distRampSteps[3];
     uint16_t period;
-
 }control_ramp_t;
 
 void setControlPins(uint8_t outputMotor,uint8_t enablePin,uint8_t stepPin,uint8_t dirPin);
@@ -70,6 +67,3 @@ void setVel(uint8_t velocity);
 void setEnableMotors(void);
 void setDisableMotors(void);
 uint8_t getVelPercent(void);
-
-void rampHandler(uint8_t motor, uint32_t actualCont, uint32_t totalSteps);
-void setRampa(uint8_t velFinal);

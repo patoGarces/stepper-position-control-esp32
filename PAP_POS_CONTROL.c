@@ -6,39 +6,39 @@
 #include "driver/gpio.h"
 #include "driver/gptimer.h"
 
-#define TIMER_GROUP_MOTOR   TIMER_GROUP_0
-#define TIMER_NUM_MOTOR     TIMER_0
 /* Cantidad de ticks hasta que se dispare la interrupcion */
-#define MOTOR_PERIOD_US     5
+#define MOTOR_PERIOD_US     1000
+
+#define VAL_RAMP_PERCENT 0.1
 
 QueueHandle_t       handleMoveAxis;
 SemaphoreHandle_t   handleSyncMovement;
 motors_control_t    outputMotors;
 control_ramp_t      rampMotors;
+gptimer_handle_t    handleTimer = NULL;
+
+static void reloadAlarm( uint8_t velocity );
+static void rampHandler(uint8_t motor, uint32_t actualCont, uint32_t totalSteps);
+static void setRampa(void);
 
 static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx) {
     uint8_t motor;
     BaseType_t high_task_awoken = pdFALSE;
 
-    if(outputMotors.motorVelContUs < outputMotors.motorVelUs){          // TODO: eliminar esta logica, manejar la velocidad con el periodo de la alarma
-        outputMotors.motorVelContUs++;
-    }
-    else{
-        outputMotors.motorVelContUs = 0;
-        for(motor=0;motor<3;motor++){
+    for(motor=0;motor<3;motor++){
 
-            if(outputMotors.motorsControl[motor].flagRunning){
-                if(outputMotors.motorsControl[motor].contMotor < outputMotors.motorsControl[motor].stepsMotor){
+        if( outputMotors.motorsControl[motor].flagRunning ){
 
-                    outputMotors.motorsControl[motor].contMotor++;
-                    gpio_set_level(outputMotors.motorsGpio.motors[motor].stepPin,outputMotors.motorsControl[motor].flagToggle);
-                    outputMotors.motorsControl[motor].flagToggle = !outputMotors.motorsControl[motor].flagToggle;  
+            if(outputMotors.motorsControl[motor].contMotor < outputMotors.motorsControl[motor].stepsMotor){
 
-                    rampHandler(motor,outputMotors.motorsControl[motor].contMotor,outputMotors.motorsControl[motor].stepsMotor);
-                }
-                else{ 
-                    outputMotors.motorsControl[motor].flagRunning = false;
-                }
+                outputMotors.motorsControl[motor].contMotor++;
+                gpio_set_level(outputMotors.motorsGpio.motors[motor].stepPin,outputMotors.motorsControl[motor].flagToggle);
+                outputMotors.motorsControl[motor].flagToggle = !outputMotors.motorsControl[motor].flagToggle;  
+
+                rampHandler(motor,outputMotors.motorsControl[motor].contMotor,outputMotors.motorsControl[motor].stepsMotor);
+            }
+            else{ 
+                outputMotors.motorsControl[motor].flagRunning = false;
             }
         }
     }
@@ -46,65 +46,65 @@ static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm
     return (high_task_awoken == pdTRUE);
 }
 
-void setRampa(uint8_t velFinal){
+static void setRampa( void ){
 
-    rampMotors.actualVel = 10;    
-    rampMotors.targetVel = velFinal;     
-    setVel(1);
+    rampMotors.actualVel = 1;    
+    rampMotors.targetVel = outputMotors.motorVelPercent;     
+    reloadAlarm(1);
     rampMotors.stateRamp = RAMP_UP;
     
-    rampMotors.distRampSteps[0] = outputMotors.motorsControl[0].stepsMotor * 0.3; // TODO: hacer constante la distancia de rampa
+    rampMotors.distRampSteps[0] = outputMotors.motorsControl[0].stepsMotor * VAL_RAMP_PERCENT;
 
-    rampMotors.period = rampMotors.distRampSteps[0]/100;                   // el periodo es la distancia seteada pasada a pasos, dividido el 100% de velocidad total
+    rampMotors.period = rampMotors.distRampSteps[0]/100;                   // el periodo es la cantidad de pasos dividido el 100% de velocidad total
     
     if(rampMotors.period == 0){
       rampMotors.period = 1;
     }
 }
 
-void rampHandler(uint8_t motor, uint32_t actualCont, uint32_t totalSteps){
+static void rampHandler(uint8_t motor, uint32_t actualCont, uint32_t totalSteps){
 
     switch( rampMotors.stateRamp ){
 
-    case RAMP_UP:
-      
-    //   if( motor.countSteps < rampa.distRampaSteps){           // dentro de la rampa de subida, debo chequear si no me estoy solapando con la rampa de bajada
-    //     rampa.stateRampa = RAMPA_BAJADA;
-    //   }
-      
-      if(( actualCont % rampMotors.period) == 0){
-        
-        if( rampMotors.actualVel < rampMotors.targetVel){
-          rampMotors.actualVel++;
-          setVel( rampMotors.actualVel ); 
-        }
-        else{
-          rampMotors.stateRamp = RAMP_MESETA;
-        }
-      }
-    break;
-
-    case RAMP_MESETA:
-
-        if( actualCont > ( outputMotors.motorsControl[0].stepsMotor - rampMotors.distRampSteps[0])){
-            rampMotors.stateRamp = RAMP_DOWN;
-        }
-
-    break;
-
-    case RAMP_DOWN:
-
-        if(( actualCont % rampMotors.period) == 0){
-
-            if( rampMotors.actualVel > 1){
-                rampMotors.actualVel--;
-                setVel( rampMotors.actualVel ); 
+        case RAMP_UP:
+            
+        //   if( motor.countSteps < rampa.distRampaSteps){           // dentro de la rampa de subida, debo chequear si no me estoy solapando con la rampa de bajada
+        //     rampa.stateRampa = RAMPA_BAJADA;
+        //   }
+            
+            if(( actualCont % rampMotors.period) == 0){
+            
+            if( rampMotors.actualVel < rampMotors.targetVel){
+                rampMotors.actualVel++;
+                reloadAlarm( rampMotors.actualVel ); 
             }
             else{
                 rampMotors.stateRamp = RAMP_MESETA;
             }
-        }
-    break;
+            }
+        break;
+
+        case RAMP_MESETA:
+
+            if( actualCont > ( outputMotors.motorsControl[0].stepsMotor - rampMotors.distRampSteps[0])){
+                rampMotors.stateRamp = RAMP_DOWN;
+            }
+
+        break;
+
+        case RAMP_DOWN:
+
+            if(( actualCont % rampMotors.period) == 0){
+
+                if( rampMotors.actualVel > 1){
+                    rampMotors.actualVel--;
+                    reloadAlarm( rampMotors.actualVel ); 
+                }
+                else{
+                    rampMotors.stateRamp = RAMP_MESETA;
+                }
+            }
+        break;
   }
 }
 
@@ -113,31 +113,26 @@ static void handlerQueueAxis(void *pvParameters){
     motor_control_t receiveNewMovement[3];
     uint8_t motor;
 
-
     handleMoveAxis = xQueueCreate(100,sizeof(motors_control_t));
-    // handleSyncMovement = xSemaphoreCreateBinary();
 
     while(1){
 
-        // if( xSemaphoreTake(handleSyncMovement,1 )){
         if( !outputMotors.motorsControl[MOTOR_A].flagRunning &&
             !outputMotors.motorsControl[MOTOR_B].flagRunning &&
             !outputMotors.motorsControl[MOTOR_C].flagRunning ) {
              
-            vTaskDelay(pdMS_TO_TICKS(200));                         // TODO: solo para debug, BORRAR
             if(xQueueReceive( handleMoveAxis,
                 ( void * ) &receiveNewMovement,
-                1)){
+                0)){
 
                 for( motor = 0; motor < 3; motor++ ){
                     outputMotors.motorsControl[motor] = receiveNewMovement[motor];
                     gpio_set_level(outputMotors.motorsGpio.motors[motor].dirPin,outputMotors.motorsControl[motor].dir); 
                 }
-
-                setRampa(100);
+                setRampa();
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
@@ -152,15 +147,9 @@ void setControlPins(uint8_t outputMotor,uint8_t enablePin,uint8_t stepPin,uint8_
     gpio_set_direction( outputMotors.motorsGpio.motors[outputMotor].stepPin = stepPin,GPIO_MODE_OUTPUT );
 }
 
-
 void initMotors(void){
 
-    outputMotors.motorVelContUs = 0;
-    outputMotors.motorVelPercent = VEL_PERCENT_DEFAULT;
-    setVel(outputMotors.motorVelPercent);                   // inician los motores con la velocidad default
     setDisableMotors();                                     // Inician los motores deshabilitados
-
-    gptimer_handle_t handleTimer = NULL;
 
     gptimer_config_t timerConfig = {
 
@@ -171,24 +160,36 @@ void initMotors(void){
 
     ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimer));
     
-    gptimer_alarm_config_t alarmMpu ={
-        .alarm_count = MOTOR_PERIOD_US,      // Desborde de interrupcion: 1us de cada tick * MOTOR_PERIOD_US = 10us
-        .reload_count = 0,
-        .flags.auto_reload_on_alarm = true,
-    };
-
-    ESP_ERROR_CHECK(gptimer_set_alarm_action(handleTimer,&alarmMpu));
-    
     gptimer_event_callbacks_t newCallback ={
         .on_alarm = timerInterrupt,
     };
 
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimer,&newCallback,NULL));
+    
+    outputMotors.motorVelPercent = VEL_PERCENT_DEFAULT;
+    setVel(outputMotors.motorVelPercent);                   // inician los motores con la velocidad default
 
     ESP_ERROR_CHECK(gptimer_enable(handleTimer));
     ESP_ERROR_CHECK(gptimer_start(handleTimer));
 
     xTaskCreate(handlerQueueAxis,"axis Handler",2048,NULL,4,NULL);
+}
+
+static void reloadAlarm( uint8_t velocity ){
+    uint16_t velocityUs = 0;
+
+    if(velocity > 0 && velocity <= 100){
+        velocityUs = MAX_VELOCITY_US + (((MIN_VELOCITY_US-MAX_VELOCITY_US)*(101-velocity))/100);
+
+        // printf("VelMinUs: %dus,VelMaxUs: %dus,velocity: %d%%,salida: %d\n",MIN_VELOCITY_US,MAX_VELOCITY_US,velocity,outputMotors.motorVelUs);
+
+        gptimer_alarm_config_t alarm_config = {
+            .alarm_count = velocityUs,
+            .reload_count = 0,
+            .flags.auto_reload_on_alarm = true,
+        };
+        gptimer_set_alarm_action(handleTimer, &alarm_config);
+    } 
 }
 
 void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC,uint16_t duration){          // TODO: encolar estas solicitudes en una estructura de tipo motor_control_t
@@ -221,10 +222,7 @@ void setVel(uint8_t velocity){
 
     if(velocity > 0 && velocity <= 100){
         outputMotors.motorVelPercent = velocity;
-        outputMotors.motorVelUs = MAX_VELOCITY_US + (((MIN_VELOCITY_US-MAX_VELOCITY_US)*(100-velocity))/100);
-        outputMotors.motorVelUs /= 10;
-
-        // printf("VelMinUs: %dus,VelMaxUs: %dus,velocity: %d%%,salida: %d\n",MIN_VELOCITY_US,MAX_VELOCITY_US,velocity,outputMotors.motorVelUs);
+        reloadAlarm(velocity);    
     }
 }
 

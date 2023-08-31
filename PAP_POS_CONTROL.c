@@ -59,16 +59,17 @@ static void generateStep( uint8_t indexMotor ){
 }
 
 static void setRampa( void ){
-    uint8_t indexMotor;
+    uint8_t indexMotor,difVelocity=0;
 
     for( indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){ 
 
         rampMotors[indexMotor].actualVel = 1;    
-        rampMotors[indexMotor].targetVel = outputMotors.motorVelPercent;     
+        rampMotors[indexMotor].targetVel = outputMotors.motorsControl[indexMotor].velocity;
+        difVelocity = rampMotors[indexMotor].targetVel - rampMotors[indexMotor].actualVel ;  
         reloadAlarm( indexMotor,1 );
         rampMotors[indexMotor].stateRamp = RAMP_UP;
         rampMotors[indexMotor].distRampSteps = outputMotors.motorsControl[indexMotor].stepsMotor * VAL_RAMP_PERCENT;
-        rampMotors[indexMotor].period = rampMotors[indexMotor].distRampSteps/100;                   // el periodo es la cantidad de pasos dividido el 100% de velocidad total
+        rampMotors[indexMotor].period = rampMotors[indexMotor].distRampSteps / difVelocity ;                   // el periodo es la cantidad de pasos dividido el diferencial de velocidad total
         
         if(rampMotors[indexMotor].period == 0){
             rampMotors[indexMotor].period = 1;
@@ -232,11 +233,13 @@ void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t 
     newMovement[MOTOR_A].stepsMotor = stepsA *2;
     newMovement[MOTOR_A].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
     newMovement[MOTOR_A].flagRunning = true;
+    newMovement[MOTOR_A].velocity = 100;
 
     newMovement[MOTOR_B].dir = dirB;
     newMovement[MOTOR_B].stepsMotor = stepsB *2;
     newMovement[MOTOR_B].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
     newMovement[MOTOR_B].flagRunning = true;
+    newMovement[MOTOR_B].velocity = 50;
 
     newMovement[MOTOR_C].dir = dirC;
     newMovement[MOTOR_C].stepsMotor = stepsC *2;

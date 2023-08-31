@@ -210,11 +210,17 @@ static void reloadAlarm( uint8_t indexMotor, uint8_t velocity ){
             .reload_count = 0,
             .flags.auto_reload_on_alarm = true,
         };
-        gptimer_set_alarm_action(handleTimerA, &alarm_config);
-        alarm_config.alarm_count = velocityUs;
-        gptimer_set_alarm_action(handleTimerB, &alarm_config);
-        alarm_config.alarm_count = velocityUs;
-        gptimer_set_alarm_action(handleTimerC, &alarm_config);
+        switch ( indexMotor ){
+            case MOTOR_A:
+                gptimer_set_alarm_action(handleTimerA, &alarm_config);
+            break;
+            case MOTOR_B:
+                gptimer_set_alarm_action(handleTimerB, &alarm_config);
+            break;
+            case MOTOR_C:
+                gptimer_set_alarm_action(handleTimerC, &alarm_config);
+            break;
+        }
     } 
 }
 

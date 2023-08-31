@@ -37,10 +37,10 @@ typedef struct{
 }output_motors_pins_t;
 
 typedef struct{
+    uint8_t     velocity;
+    uint8_t     dir;
     uint32_t    contMotor;
     uint32_t    stepsMotor;
-    uint16_t    durationMs;
-    uint8_t     dir;
     uint8_t     flagRunning;
     uint8_t     flagToggle;
 }motor_control_t;
@@ -53,16 +53,15 @@ typedef struct{
 }motors_control_t;
 
 typedef struct{
-    uint8_t  stateRamp;
     uint8_t  actualVel;
     uint8_t  targetVel;
-    uint32_t distRampSteps[3];
+    uint8_t  stateRamp;
+    uint32_t distRampSteps;
     uint16_t period;
 }control_ramp_t;
 
-void setControlPins(uint8_t outputMotor,uint8_t enablePin,uint8_t stepPin,uint8_t dirPin);
-void initMotors(void);
-void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC,uint16_t duration);
+void initMotors(output_motors_pins_t pinout);
+void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC);
 void setVel(uint8_t velocity);
 void setEnableMotors(void);
 void setDisableMotors(void);

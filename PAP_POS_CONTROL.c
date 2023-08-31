@@ -9,62 +9,77 @@
 /* Cantidad de ticks hasta que se dispare la interrupcion */
 #define MOTOR_PERIOD_US     1000
 
-#define VAL_RAMP_PERCENT 0.1
+#define VAL_RAMP_PERCENT 0.3
 
 QueueHandle_t       handleMoveAxis;
 SemaphoreHandle_t   handleSyncMovement;
 motors_control_t    outputMotors;
-control_ramp_t      rampMotors;
-gptimer_handle_t    handleTimer = NULL;
+control_ramp_t      rampMotors[CANT_MOTORS];
 
-static void reloadAlarm( uint8_t velocity );
-static void rampHandler(uint8_t motor, uint32_t actualCont, uint32_t totalSteps);
-static void setRampa(void);
+gptimer_handle_t    handleTimerA = NULL;
+gptimer_handle_t    handleTimerB = NULL;
+gptimer_handle_t    handleTimerC = NULL;
+
+static void generateStep( uint8_t indexMotor );
+
+static void reloadAlarm( uint8_t indexMotor, uint8_t velocity );
+static void rampHandler( uint8_t motor, uint32_t actualCont, uint32_t totalSteps );
+static void setRampa( void );
 
 static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx) {
-    uint8_t motor;
-    BaseType_t high_task_awoken = pdFALSE;
 
-    for(motor=0;motor<3;motor++){
+    if( timer == handleTimerA ){
+        generateStep(MOTOR_A); 
+    }
+    else if( timer == handleTimerB ){
+        generateStep(MOTOR_B);
+    }
+    else{
+        generateStep(MOTOR_C);
+    }
+    return  false;
+}
 
-        if( outputMotors.motorsControl[motor].flagRunning ){
+static void generateStep( uint8_t indexMotor ){
 
-            if(outputMotors.motorsControl[motor].contMotor < outputMotors.motorsControl[motor].stepsMotor){
+    if( outputMotors.motorsControl[indexMotor].flagRunning ){
 
-                outputMotors.motorsControl[motor].contMotor++;
-                gpio_set_level(outputMotors.motorsGpio.motors[motor].stepPin,outputMotors.motorsControl[motor].flagToggle);
-                outputMotors.motorsControl[motor].flagToggle = !outputMotors.motorsControl[motor].flagToggle;  
+        if(outputMotors.motorsControl[indexMotor].contMotor < outputMotors.motorsControl[indexMotor].stepsMotor){
 
-                rampHandler(motor,outputMotors.motorsControl[motor].contMotor,outputMotors.motorsControl[motor].stepsMotor);
-            }
-            else{ 
-                outputMotors.motorsControl[motor].flagRunning = false;
-            }
+            outputMotors.motorsControl[indexMotor].contMotor++;
+            gpio_set_level(outputMotors.motorsGpio.motors[indexMotor].stepPin,outputMotors.motorsControl[indexMotor].flagToggle);
+            outputMotors.motorsControl[indexMotor].flagToggle = !outputMotors.motorsControl[indexMotor].flagToggle;  
+
+            rampHandler(indexMotor,outputMotors.motorsControl[indexMotor].contMotor,outputMotors.motorsControl[indexMotor].stepsMotor);
+        }
+        else{ 
+            outputMotors.motorsControl[indexMotor].flagRunning = false;
         }
     }
-        
-    return (high_task_awoken == pdTRUE);
 }
 
 static void setRampa( void ){
+    uint8_t indexMotor;
 
-    rampMotors.actualVel = 1;    
-    rampMotors.targetVel = outputMotors.motorVelPercent;     
-    reloadAlarm(1);
-    rampMotors.stateRamp = RAMP_UP;
-    
-    rampMotors.distRampSteps[0] = outputMotors.motorsControl[0].stepsMotor * VAL_RAMP_PERCENT;
+    for( indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){ 
 
-    rampMotors.period = rampMotors.distRampSteps[0]/100;                   // el periodo es la cantidad de pasos dividido el 100% de velocidad total
-    
-    if(rampMotors.period == 0){
-      rampMotors.period = 1;
+        rampMotors[indexMotor].actualVel = 1;    
+        rampMotors[indexMotor].targetVel = outputMotors.motorVelPercent;     
+        reloadAlarm( indexMotor,1 );
+        rampMotors[indexMotor].stateRamp = RAMP_UP;
+        rampMotors[indexMotor].distRampSteps = outputMotors.motorsControl[indexMotor].stepsMotor * VAL_RAMP_PERCENT;
+        rampMotors[indexMotor].period = rampMotors[indexMotor].distRampSteps/100;                   // el periodo es la cantidad de pasos dividido el 100% de velocidad total
+        
+        if(rampMotors[indexMotor].period == 0){
+            rampMotors[indexMotor].period = 1;
+        }
+        printf("Nueva rampa, motor %d,stepMotor: %ld,distanciaRampa: %ld,periodo: %d,targetVel:%d\n",indexMotor,outputMotors.motorsControl[indexMotor].stepsMotor,rampMotors[indexMotor].distRampSteps,rampMotors[indexMotor].period,rampMotors[indexMotor].targetVel);
     }
 }
 
-static void rampHandler(uint8_t motor, uint32_t actualCont, uint32_t totalSteps){
+static void rampHandler(uint8_t indexMotor, uint32_t actualCont, uint32_t totalSteps){
 
-    switch( rampMotors.stateRamp ){
+    switch( rampMotors[indexMotor].stateRamp ){
 
         case RAMP_UP:
             
@@ -72,36 +87,35 @@ static void rampHandler(uint8_t motor, uint32_t actualCont, uint32_t totalSteps)
         //     rampa.stateRampa = RAMPA_BAJADA;
         //   }
             
-            if(( actualCont % rampMotors.period) == 0){
-            
-            if( rampMotors.actualVel < rampMotors.targetVel){
-                rampMotors.actualVel++;
-                reloadAlarm( rampMotors.actualVel ); 
-            }
-            else{
-                rampMotors.stateRamp = RAMP_MESETA;
-            }
+            if(( actualCont % rampMotors[indexMotor].period) == 0){
+                if( rampMotors[indexMotor].actualVel < rampMotors[indexMotor].targetVel){
+                    rampMotors[indexMotor].actualVel++;
+                    reloadAlarm( indexMotor, rampMotors[indexMotor].actualVel ); 
+                }
+                else{
+                    rampMotors[indexMotor].stateRamp = RAMP_MESETA;
+                }
             }
         break;
 
         case RAMP_MESETA:
 
-            if( actualCont > ( outputMotors.motorsControl[0].stepsMotor - rampMotors.distRampSteps[0])){
-                rampMotors.stateRamp = RAMP_DOWN;
+            if( actualCont > ( outputMotors.motorsControl[indexMotor].stepsMotor - rampMotors[indexMotor].distRampSteps)){
+                rampMotors[indexMotor].stateRamp = RAMP_DOWN;
             }
 
         break;
 
         case RAMP_DOWN:
 
-            if(( actualCont % rampMotors.period) == 0){
+            if(( actualCont % rampMotors[indexMotor].period) == 0){
 
-                if( rampMotors.actualVel > 1){
-                    rampMotors.actualVel--;
-                    reloadAlarm( rampMotors.actualVel ); 
+                if( rampMotors[indexMotor].actualVel > 1){
+                    rampMotors[indexMotor].actualVel--;
+                    reloadAlarm( indexMotor, rampMotors[indexMotor].actualVel ); 
                 }
                 else{
-                    rampMotors.stateRamp = RAMP_MESETA;
+                    rampMotors[indexMotor].stateRamp = RAMP_MESETA;
                 }
             }
         break;
@@ -136,20 +150,19 @@ static void handlerQueueAxis(void *pvParameters){
     }
 }
 
-void setControlPins(uint8_t outputMotor,uint8_t enablePin,uint8_t stepPin,uint8_t dirPin){
+void initMotors(output_motors_pins_t pinout){
 
-    outputMotors.motorsGpio.enablePin = enablePin;
-    outputMotors.motorsGpio.motors[outputMotor].dirPin = dirPin;
-    outputMotors.motorsGpio.motors[outputMotor].stepPin = stepPin;
+    uint8_t motor;
+
+    outputMotors.motorsGpio = pinout;
 
     gpio_set_direction( outputMotors.motorsGpio.enablePin,GPIO_MODE_OUTPUT );
-    gpio_set_direction( outputMotors.motorsGpio.motors[outputMotor].dirPin,GPIO_MODE_OUTPUT );
-    gpio_set_direction( outputMotors.motorsGpio.motors[outputMotor].stepPin = stepPin,GPIO_MODE_OUTPUT );
-}
+    for( motor=0;motor<3;motor++){
+        gpio_set_direction( outputMotors.motorsGpio.motors[motor].dirPin,GPIO_MODE_OUTPUT );
+        gpio_set_direction( outputMotors.motorsGpio.motors[motor].stepPin,GPIO_MODE_OUTPUT );
+    }
 
-void initMotors(void){
-
-    setDisableMotors();                                     // Inician los motores deshabilitados
+    setDisableMotors();
 
     gptimer_config_t timerConfig = {
 
@@ -158,24 +171,33 @@ void initMotors(void){
         .resolution_hz = 1000000,
     };
 
-    ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimer));
+    // ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimer));
+    ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerA));
+    ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerB));
+    ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerC));
     
     gptimer_event_callbacks_t newCallback ={
         .on_alarm = timerInterrupt,
     };
 
-    ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimer,&newCallback,NULL));
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerA,&newCallback,NULL));
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerB,&newCallback,NULL));
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerC,&newCallback,NULL));
     
     outputMotors.motorVelPercent = VEL_PERCENT_DEFAULT;
     setVel(outputMotors.motorVelPercent);                   // inician los motores con la velocidad default
 
-    ESP_ERROR_CHECK(gptimer_enable(handleTimer));
-    ESP_ERROR_CHECK(gptimer_start(handleTimer));
+    ESP_ERROR_CHECK(gptimer_enable(handleTimerA));
+    ESP_ERROR_CHECK(gptimer_enable(handleTimerB));
+    ESP_ERROR_CHECK(gptimer_enable(handleTimerC));
+    ESP_ERROR_CHECK(gptimer_start(handleTimerA));
+    ESP_ERROR_CHECK(gptimer_start(handleTimerB));
+    ESP_ERROR_CHECK(gptimer_start(handleTimerC));
 
     xTaskCreate(handlerQueueAxis,"axis Handler",2048,NULL,4,NULL);
 }
 
-static void reloadAlarm( uint8_t velocity ){
+static void reloadAlarm( uint8_t indexMotor, uint8_t velocity ){
     uint16_t velocityUs = 0;
 
     if(velocity > 0 && velocity <= 100){
@@ -188,28 +210,29 @@ static void reloadAlarm( uint8_t velocity ){
             .reload_count = 0,
             .flags.auto_reload_on_alarm = true,
         };
-        gptimer_set_alarm_action(handleTimer, &alarm_config);
+        gptimer_set_alarm_action(handleTimerA, &alarm_config);
+        alarm_config.alarm_count = velocityUs;
+        gptimer_set_alarm_action(handleTimerB, &alarm_config);
+        alarm_config.alarm_count = velocityUs;
+        gptimer_set_alarm_action(handleTimerC, &alarm_config);
     } 
 }
 
-void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC,uint16_t duration){          // TODO: encolar estas solicitudes en una estructura de tipo motor_control_t
+void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC){          // TODO: encolar estas solicitudes en una estructura de tipo motor_control_t
     
     motor_control_t newMovement[3];
 
     newMovement[MOTOR_A].dir = dirA;
-    newMovement[MOTOR_A].durationMs = duration;
     newMovement[MOTOR_A].stepsMotor = stepsA *2;
     newMovement[MOTOR_A].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
     newMovement[MOTOR_A].flagRunning = true;
 
     newMovement[MOTOR_B].dir = dirB;
-    newMovement[MOTOR_B].durationMs = duration;
     newMovement[MOTOR_B].stepsMotor = stepsB *2;
     newMovement[MOTOR_B].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
     newMovement[MOTOR_B].flagRunning = true;
 
     newMovement[MOTOR_C].dir = dirC;
-    newMovement[MOTOR_C].durationMs = duration;
     newMovement[MOTOR_C].stepsMotor = stepsC *2;
     newMovement[MOTOR_C].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
     newMovement[MOTOR_C].flagRunning = true;
@@ -222,7 +245,9 @@ void setVel(uint8_t velocity){
 
     if(velocity > 0 && velocity <= 100){
         outputMotors.motorVelPercent = velocity;
-        reloadAlarm(velocity);    
+        reloadAlarm(0,velocity);   
+        reloadAlarm(1,velocity);   
+        reloadAlarm(2,velocity);    
     }
 }
 

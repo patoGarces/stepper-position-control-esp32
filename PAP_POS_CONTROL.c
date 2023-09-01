@@ -158,7 +158,7 @@ static void handlerQueueAxis(void *pvParameters){
                     gpio_set_level(outputMotors.motorsGpio.motors[indexMotor].dirPin,outputMotors.motorsControl[indexMotor].dir); 
                 }
 
-                for( indexMotor = 0; indexMotor < 2; indexMotor++ ){                    // Calculo la relacion entre la mayor cantidad de pasos y el resto de los ejes, para calcular la velocidad de interpolacion
+                for( indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++ ){                    // Calculo la relacion entre la mayor cantidad de pasos y el resto de los ejes, para calcular la velocidad de interpolacion
                     outputMotors.motorsControl[indexMotor].velocity =  (uint32_t)(outputMotors.motorsControl[indexMotor].stepsMotor * 100) / (float)maxSteps;
                     if( outputMotors.motorsControl[indexMotor].velocity == 0 ){
                         outputMotors.motorsControl[indexMotor].velocity = 1;
@@ -166,6 +166,9 @@ static void handlerQueueAxis(void *pvParameters){
                     ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "Max: %ld, act: %ld,vel:%d",maxSteps,outputMotors.motorsControl[indexMotor].stepsMotor,outputMotors.motorsControl[indexMotor].velocity);
                 }   
                 setRampa();
+                outputMotors.motorsControl[MOTOR_A].flagRunning = true;
+                outputMotors.motorsControl[MOTOR_B].flagRunning = true;
+                outputMotors.motorsControl[MOTOR_C].flagRunning = true;
             }
         }
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -255,20 +258,20 @@ void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t 
     newMovement[MOTOR_A].dir = dirA;
     newMovement[MOTOR_A].stepsMotor = stepsA *2;
     newMovement[MOTOR_A].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
-    newMovement[MOTOR_A].flagRunning = true;
     newMovement[MOTOR_A].velocity = outputMotors.motorVelPercent;
+    newMovement[MOTOR_A].flagRunning = false;
 
     newMovement[MOTOR_B].dir = dirB;
     newMovement[MOTOR_B].stepsMotor = stepsB *2;
     newMovement[MOTOR_B].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
-    newMovement[MOTOR_B].flagRunning = true;
     newMovement[MOTOR_B].velocity = outputMotors.motorVelPercent;
+    newMovement[MOTOR_B].flagRunning = false;
 
     newMovement[MOTOR_C].dir = dirC;
     newMovement[MOTOR_C].stepsMotor = stepsC *2;
     newMovement[MOTOR_C].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
-    newMovement[MOTOR_C].flagRunning = true;
     newMovement[MOTOR_C].velocity = outputMotors.motorVelPercent;
+    newMovement[MOTOR_C].flagRunning = false;
 
     xQueueSend(handleMoveAxis,&newMovement,0);
     printf("Nuevo movimiento agregado a la cola,pendientes: %d\n",uxQueueMessagesWaiting( handleMoveAxis )); 

@@ -37,7 +37,7 @@ typedef struct{
 }output_motors_pins_t;
 
 typedef struct{
-    uint8_t     velocity;
+    uint16_t    velocityUs;
     uint8_t     dir;
     uint32_t    contMotor;
     uint32_t    stepsMotor;
@@ -53,11 +53,12 @@ typedef struct{
 }motors_control_t;
 
 typedef struct{
-    uint8_t  actualVel;
-    uint8_t  targetVel;
+    uint16_t actualVelUs;
+    uint16_t targetVelUs;
     uint8_t  stateRamp;
     uint32_t distRampSteps;
     uint16_t period;
+    uint16_t dxdt;
 }control_ramp_t;
 
 void initMotors(output_motors_pins_t pinout);

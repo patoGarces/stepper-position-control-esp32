@@ -6,11 +6,15 @@
 #include "driver/gpio.h"
 #include "driver/gptimer.h"
 #include "esp_log.h"
+#include "math.h"
 
 #define PAP_POS_CONTROL_TAL "PAP_POS_CONTROL"
 
 /* Cantidad de ticks hasta que se dispare la interrupcion */
 #define MOTOR_PERIOD_US     1000
+
+/* Definicion en la rampa, la velocidad tiene 1000 puntos de definicion*/
+#define RAMP_DEFINITION     100
 
 #define VAL_RAMP_PERCENT 0.1
 
@@ -24,8 +28,8 @@ gptimer_handle_t    handleTimerB = NULL;
 gptimer_handle_t    handleTimerC = NULL;
 
 static void generateStep( uint8_t indexMotor );
-
-static void reloadAlarm( uint8_t indexMotor, uint8_t velocity );
+static uint16_t vel2us( uint8_t velInPercent);
+static void reloadAlarm( uint8_t indexMotor, uint16_t velocity );
 static void rampHandler( uint8_t motor, uint32_t actualCont, uint32_t totalSteps );
 static void setRampa( void );
 
@@ -62,25 +66,30 @@ static void generateStep( uint8_t indexMotor ){
 }
 
 static void setRampa( void ){
-    uint8_t indexMotor,difVelocity=0;
+    uint8_t indexMotor;
+    uint16_t difVelocity=0;
 
     for( indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){ 
 
-        rampMotors[indexMotor].actualVel = 1;    
-        rampMotors[indexMotor].targetVel = outputMotors.motorsControl[indexMotor].velocity;
-        difVelocity = rampMotors[indexMotor].targetVel - rampMotors[indexMotor].actualVel;
-        if( difVelocity ==0 ){
+        rampMotors[indexMotor].actualVelUs = vel2us(1);    
+        rampMotors[indexMotor].targetVelUs = outputMotors.motorsControl[indexMotor].velocityUs;
+        difVelocity = abs(rampMotors[indexMotor].actualVelUs -  rampMotors[indexMotor].targetVelUs);
+        if( difVelocity == 0 ){
             difVelocity = 1;
         }  
-        reloadAlarm( indexMotor,1 );
+
+        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "difVelocity %d,targetUs: %ld,actualUs: %ld\n",difVelocity,rampMotors[indexMotor].targetVelUs , rampMotors[indexMotor].actualVelUs);
+
+        reloadAlarm( indexMotor, rampMotors[indexMotor].actualVelUs );
         rampMotors[indexMotor].stateRamp = RAMP_UP;
         rampMotors[indexMotor].distRampSteps = outputMotors.motorsControl[indexMotor].stepsMotor * VAL_RAMP_PERCENT;
-        rampMotors[indexMotor].period = rampMotors[indexMotor].distRampSteps / difVelocity ;                   // el periodo es la cantidad de pasos dividido el diferencial de velocidad total
-        
+        rampMotors[indexMotor].period = rampMotors[indexMotor].distRampSteps  / RAMP_DEFINITION;                    // el periodo es la cantidad de pasos dividido la resolucion de la rampa
+        rampMotors[indexMotor].dxdt = ceil( difVelocity / (float)RAMP_DEFINITION  );                                                // dxdt es la pendiente entre cada paso de la rampa
+
         if(rampMotors[indexMotor].period == 0){
             rampMotors[indexMotor].period = 1;
         }
-        // printf("Nueva rampa, motor %d,stepMotor: %ld,distanciaRampa: %ld,periodo: %d,targetVel:%d\n",indexMotor,outputMotors.motorsControl[indexMotor].stepsMotor,rampMotors[indexMotor].distRampSteps,rampMotors[indexMotor].period,rampMotors[indexMotor].targetVel);
+        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "distRamp %ld,difVelocity %d, Periodo %d, dxdt: %d\n",rampMotors[indexMotor].distRampSteps,difVelocity,rampMotors[indexMotor].period,rampMotors[indexMotor].dxdt);
     }
 }
 
@@ -95,9 +104,9 @@ static void rampHandler(uint8_t indexMotor, uint32_t actualCont, uint32_t totalS
         //   }
             
             if(( actualCont % rampMotors[indexMotor].period) == 0){
-                if( rampMotors[indexMotor].actualVel < rampMotors[indexMotor].targetVel){
-                    rampMotors[indexMotor].actualVel++;
-                    reloadAlarm( indexMotor, rampMotors[indexMotor].actualVel ); 
+                if( rampMotors[indexMotor].actualVelUs > rampMotors[indexMotor].targetVelUs){
+                    rampMotors[indexMotor].actualVelUs -= rampMotors[indexMotor].dxdt;
+                    reloadAlarm( indexMotor, rampMotors[indexMotor].actualVelUs ); 
                 }
                 else{
                     rampMotors[indexMotor].stateRamp = RAMP_MESETA;
@@ -116,10 +125,9 @@ static void rampHandler(uint8_t indexMotor, uint32_t actualCont, uint32_t totalS
         case RAMP_DOWN:
 
             if(( actualCont % rampMotors[indexMotor].period) == 0){
-
-                if( rampMotors[indexMotor].actualVel > 1){
-                    rampMotors[indexMotor].actualVel--;
-                    reloadAlarm( indexMotor, rampMotors[indexMotor].actualVel ); 
+                if( rampMotors[indexMotor].actualVelUs < vel2us(1) ){
+                    rampMotors[indexMotor].actualVelUs += rampMotors[indexMotor].dxdt;
+                    reloadAlarm( indexMotor, rampMotors[indexMotor].actualVelUs );    
                 }
                 else{
                     rampMotors[indexMotor].stateRamp = RAMP_MESETA;
@@ -129,11 +137,28 @@ static void rampHandler(uint8_t indexMotor, uint32_t actualCont, uint32_t totalS
   }
 }
 
+void calculateInterpolation( void ){
+    uint32_t maxSteps = 0;
+    uint8_t indexMotor;
+
+    maxSteps = outputMotors.motorsControl[MOTOR_A].stepsMotor;
+
+    for( indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++ ){ 
+        if( outputMotors.motorsControl[indexMotor].stepsMotor > maxSteps ){
+            maxSteps = outputMotors.motorsControl[indexMotor].stepsMotor;
+        }
+    }
+
+    for( indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++ ){ 
+        outputMotors.motorsControl[indexMotor].velocityUs =  (uint32_t)(( maxSteps * vel2us(outputMotors.motorVelPercent)) / (float)outputMotors.motorsControl[indexMotor].stepsMotor );
+        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "INTERPOLATION: Max: %ld, act: %ld,vel:%ld",maxSteps,outputMotors.motorsControl[indexMotor].stepsMotor,outputMotors.motorsControl[indexMotor].velocityUs);
+    }
+}
+
 static void handlerQueueAxis(void *pvParameters){
 
     motor_control_t receiveNewMovement[3];
     uint8_t indexMotor;
-    uint32_t maxSteps = 0;
 
     handleMoveAxis = xQueueCreate(100,sizeof(motors_control_t));
 
@@ -147,35 +172,25 @@ static void handlerQueueAxis(void *pvParameters){
                 ( void * ) &receiveNewMovement,
                 0)){
 
-                maxSteps = receiveNewMovement[0].stepsMotor;
-
                 for( indexMotor = 0; indexMotor < 3; indexMotor++ ){
-
-                    if( receiveNewMovement[indexMotor].stepsMotor > maxSteps ){
-                        maxSteps = receiveNewMovement[indexMotor].stepsMotor;
-                    }
                     outputMotors.motorsControl[indexMotor] = receiveNewMovement[indexMotor];
                     gpio_set_level(outputMotors.motorsGpio.motors[indexMotor].dirPin,outputMotors.motorsControl[indexMotor].dir); 
+                    
                 }
 
-                for( indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++ ){                    // Calculo la relacion entre la mayor cantidad de pasos y el resto de los ejes, para calcular la velocidad de interpolacion
-                    outputMotors.motorsControl[indexMotor].velocity =  (uint32_t)(outputMotors.motorsControl[indexMotor].stepsMotor * 100) / (float)maxSteps;
-                    if( outputMotors.motorsControl[indexMotor].velocity == 0 ){
-                        outputMotors.motorsControl[indexMotor].velocity = 1;
-                    }
-                    ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "Max: %ld, act: %ld,vel:%d",maxSteps,outputMotors.motorsControl[indexMotor].stepsMotor,outputMotors.motorsControl[indexMotor].velocity);
-                }   
+                calculateInterpolation();
                 setRampa();
+
                 outputMotors.motorsControl[MOTOR_A].flagRunning = true;
                 outputMotors.motorsControl[MOTOR_B].flagRunning = true;
                 outputMotors.motorsControl[MOTOR_C].flagRunning = true;
+
+                
             }
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
-
-// TODO: hacer float la velocidad!
 
 void initMotors(output_motors_pins_t pinout){
 
@@ -224,13 +239,13 @@ void initMotors(output_motors_pins_t pinout){
     xTaskCreate(handlerQueueAxis,"axis Handler",4096,NULL,4,NULL);          // TODO: medir el tamaño de stack consumido
 }
 
-static void reloadAlarm( uint8_t indexMotor, uint8_t velocity ){
-    uint16_t velocityUs = 0;
+static void reloadAlarm( uint8_t indexMotor, uint16_t velocityUs ){
+    // uint16_t velocityUs = 0;
 
-    if(velocity > 0 && velocity <= 100){
-        velocityUs = MAX_VELOCITY_US + (((MIN_VELOCITY_US-MAX_VELOCITY_US)*(101-velocity))/100);
-
-        // printf("VelMinUs: %dus,VelMaxUs: %dus,velocity: %d%%,salida: %d\n",MIN_VELOCITY_US,MAX_VELOCITY_US,velocity,outputMotors.motorVelUs);
+    // if(velocity > 0 && velocity <= RAMP_DEFINITION){
+        // velocityUs = MAX_VELOCITY_US + (((MIN_VELOCITY_US-MAX_VELOCITY_US)*(RAMP_DEFINITION-velocity))/RAMP_DEFINITION);
+        // velocityUs = velocity;
+        // ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"motor %d: velocity: %d,salida: %d\n",indexMotor,velocity,velocityUs );
 
         gptimer_alarm_config_t alarm_config = {
             .alarm_count = velocityUs,
@@ -248,42 +263,43 @@ static void reloadAlarm( uint8_t indexMotor, uint8_t velocity ){
                 gptimer_set_alarm_action(handleTimerC, &alarm_config);
             break;
         }
-    } 
+    // } 
 }
 
-void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC){          // TODO: encolar estas solicitudes en una estructura de tipo motor_control_t
+void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC){
     
     motor_control_t newMovement[3];
 
     newMovement[MOTOR_A].dir = dirA;
     newMovement[MOTOR_A].stepsMotor = stepsA *2;
     newMovement[MOTOR_A].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
-    newMovement[MOTOR_A].velocity = outputMotors.motorVelPercent;
+    newMovement[MOTOR_A].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_A].flagRunning = false;
 
     newMovement[MOTOR_B].dir = dirB;
     newMovement[MOTOR_B].stepsMotor = stepsB *2;
     newMovement[MOTOR_B].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
-    newMovement[MOTOR_B].velocity = outputMotors.motorVelPercent;
+    newMovement[MOTOR_B].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_B].flagRunning = false;
 
     newMovement[MOTOR_C].dir = dirC;
     newMovement[MOTOR_C].stepsMotor = stepsC *2;
     newMovement[MOTOR_C].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
-    newMovement[MOTOR_C].velocity = outputMotors.motorVelPercent;
+    newMovement[MOTOR_C].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_C].flagRunning = false;
 
     xQueueSend(handleMoveAxis,&newMovement,0);
     printf("Nuevo movimiento agregado a la cola,pendientes: %d\n",uxQueueMessagesWaiting( handleMoveAxis )); 
 }
 
-void setVel(uint8_t velocity){
+static uint16_t vel2us( uint8_t velInPercent){
+    return MAX_VELOCITY_US + (((MIN_VELOCITY_US-MAX_VELOCITY_US)*(RAMP_DEFINITION-velInPercent))/RAMP_DEFINITION);
+}
 
-    if(velocity > 0 && velocity <= 100){
-        outputMotors.motorVelPercent = velocity;
-        reloadAlarm(0,velocity);   
-        reloadAlarm(1,velocity);   
-        reloadAlarm(2,velocity);    
+void setVel(uint8_t velocityInPercent){
+
+    if(velocityInPercent > 0 && velocityInPercent <= 100){
+        outputMotors.motorVelPercent = velocityInPercent;   
     }
 }
 

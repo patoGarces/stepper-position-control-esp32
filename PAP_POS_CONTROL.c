@@ -16,7 +16,7 @@
 /* Definicion en la rampa, la velocidad tiene 1000 puntos de definicion*/
 #define RAMP_DEFINITION     100
 
-#define VAL_RAMP_PERCENT 0.1
+#define VAL_RAMP_PERCENT 0.25
 
 QueueHandle_t       handleMoveAxis;
 SemaphoreHandle_t   handleSyncMovement;

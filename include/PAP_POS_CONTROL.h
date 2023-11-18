@@ -1,10 +1,10 @@
 #include "stdint.h"
 
 #define NO_DURATION     -1
-#define MIN_VELOCITY_US 3000
-#define MAX_VELOCITY_US 800     
+#define MIN_VELOCITY_US 1000
+#define MAX_VELOCITY_US 100     
 
-#define VEL_PERCENT_DEFAULT 10  // velocidad por defecto al iniciar los motores
+#define VEL_PERCENT_DEFAULT 25  // velocidad por defecto al iniciar los motores
 
 #define MOTOR_ENABLE    0
 #define MOTOR_DISABLE   1

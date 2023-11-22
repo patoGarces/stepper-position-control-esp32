@@ -266,24 +266,24 @@ static void reloadAlarm( uint8_t indexMotor, uint16_t velocityUs ){
     // } 
 }
 
-void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC){
+void moveAxis(int32_t stepsA,int32_t stepsB,int32_t stepsC){
     
     motor_control_t newMovement[3];
 
-    newMovement[MOTOR_A].dir = dirA;
-    newMovement[MOTOR_A].stepsMotor = stepsA *2;
+    newMovement[MOTOR_A].dir = stepsA > 0;
+    newMovement[MOTOR_A].stepsMotor = abs(stepsA *2);
     newMovement[MOTOR_A].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
     newMovement[MOTOR_A].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_A].flagRunning = false;
 
-    newMovement[MOTOR_B].dir = dirB;
-    newMovement[MOTOR_B].stepsMotor = stepsB *2;
+    newMovement[MOTOR_B].dir = stepsB > 0;
+    newMovement[MOTOR_B].stepsMotor = abs(stepsB *2);
     newMovement[MOTOR_B].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
     newMovement[MOTOR_B].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_B].flagRunning = false;
 
-    newMovement[MOTOR_C].dir = dirC;
-    newMovement[MOTOR_C].stepsMotor = stepsC *2;
+    newMovement[MOTOR_C].dir = stepsC > 0;
+    newMovement[MOTOR_C].stepsMotor = abs(stepsC *2);
     newMovement[MOTOR_C].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
     newMovement[MOTOR_C].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_C].flagRunning = false;

@@ -62,7 +62,7 @@ typedef struct{
 }control_ramp_t;
 
 void initMotors(output_motors_pins_t pinout);
-void moveAxis(uint8_t dirA,uint32_t stepsA,uint8_t dirB,uint32_t stepsB,uint8_t dirC,uint32_t stepsC);
+void moveAxis(int32_t stepsA,int32_t stepsB,int32_t stepsC);
 void setVel(uint8_t velocity);
 void setEnableMotors(void);
 void setDisableMotors(void);

@@ -10,28 +10,26 @@
 
 #define PAP_POS_CONTROL_TAL "PAP_POS_CONTROL"
 
-/* Cantidad de ticks hasta que se dispare la interrupcion */
-#define MOTOR_PERIOD_US     1000
-
-/* Definicion en la rampa, la velocidad tiene 1000 puntos de definicion*/
-#define RAMP_DEFINITION     100
-
-#define VAL_RAMP_PERCENT 0.25
 
 QueueHandle_t       handleMoveAxis;
 SemaphoreHandle_t   handleSyncMovement;
 motors_control_t    outputMotors;
-control_ramp_t      rampMotors[CANT_MOTORS];
+control_ramp_t      rampMotors;
 
 gptimer_handle_t    handleTimerA = NULL;
 gptimer_handle_t    handleTimerB = NULL;
 gptimer_handle_t    handleTimerC = NULL;
+gptimer_handle_t    handleTimerRamp = NULL;
+
+// TODO: bug: a alta velocidad el motor de mayor recorrido no se mueve
+
 
 static void generateStep( uint8_t indexMotor );
 static uint16_t vel2us( uint8_t velInPercent);
 static void reloadAlarm( uint8_t indexMotor, uint16_t velocity );
-static void rampHandler( uint8_t motor, uint32_t actualCont, uint32_t totalSteps );
-static void setRampa( void );
+static void rampHandler( void );
+static void calculateRamp( void );
+
 
 static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx) {
 
@@ -41,8 +39,13 @@ static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm
     else if( timer == handleTimerB ){
         generateStep(MOTOR_B);
     }
-    else{
+    else if( timer == handleTimerC ){
         generateStep(MOTOR_C);
+    }
+    else{
+        if( outputMotors.motorsControl[MOTOR_A].flagRunning){
+            rampHandler();
+        }
     }
     return  false;
 }
@@ -56,8 +59,6 @@ static void generateStep( uint8_t indexMotor ){
             outputMotors.motorsControl[indexMotor].contMotor++;
             gpio_set_level(outputMotors.motorsGpio.motors[indexMotor].stepPin,outputMotors.motorsControl[indexMotor].flagToggle);
             outputMotors.motorsControl[indexMotor].flagToggle = !outputMotors.motorsControl[indexMotor].flagToggle;  
-
-            rampHandler(indexMotor,outputMotors.motorsControl[indexMotor].contMotor,outputMotors.motorsControl[indexMotor].stepsMotor);
         }
         else{ 
             outputMotors.motorsControl[indexMotor].flagRunning = false;
@@ -65,76 +66,113 @@ static void generateStep( uint8_t indexMotor ){
     }
 }
 
-static void setRampa( void ){
-    uint8_t indexMotor;
+static void calculateRamp( void ){
+    uint8_t indexMotor=0;
     uint16_t difVelocity=0;
+
+    rampMotors.rampTotalTime = outputMotors.motorsControl[indexMotor].velocityUs * outputMotors.motorsControl[indexMotor].stepsMotor;
+    rampMotors.rampUpDownTime =  rampMotors.rampTotalTime * VAL_RAMP_PERCENT;
+    rampMotors.constantRampTime = rampMotors.rampTotalTime * ( 1.17 - (2*VAL_RAMP_PERCENT));        // 1.17 Deberia ser 1.00, pero termina la rampa antes que los pasos, con este offset queda sincronizado
+
+    rampMotors.period = rampMotors.rampUpDownTime / RAMP_DEFINITION;
+    ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "Calculo constantes rampa-> totalTime: %ld, t1: %ld, t2: %ld",rampMotors.rampTotalTime,rampMotors.rampUpDownTime, rampMotors.constantRampTime );
 
     for( indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){ 
 
-        rampMotors[indexMotor].actualVelUs = vel2us(1);    
-        rampMotors[indexMotor].targetVelUs = outputMotors.motorsControl[indexMotor].velocityUs;
-        difVelocity = abs(rampMotors[indexMotor].actualVelUs -  rampMotors[indexMotor].targetVelUs);
+        rampMotors.individualRamp[indexMotor].actualVelUs = vel2us(1);    
+        rampMotors.individualRamp[indexMotor].targetVelUs = outputMotors.motorsControl[indexMotor].velocityUs;
+        difVelocity = abs(rampMotors.individualRamp[indexMotor].actualVelUs -  rampMotors.individualRamp[indexMotor].targetVelUs);
         if( difVelocity == 0 ){
             difVelocity = 1;
+            ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"ERROR DIF DE VELOCIDAD MUY CHICA");
         }  
+        reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs );
+        
+        rampMotors.individualRamp[indexMotor].dxdt = ceil(difVelocity / RAMP_DEFINITION) ;
 
-        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "difVelocity %d,targetUs: %ld,actualUs: %ld\n",difVelocity,rampMotors[indexMotor].targetVelUs , rampMotors[indexMotor].actualVelUs);
-
-        reloadAlarm( indexMotor, rampMotors[indexMotor].actualVelUs );
-        rampMotors[indexMotor].stateRamp = RAMP_UP;
-        rampMotors[indexMotor].distRampSteps = outputMotors.motorsControl[indexMotor].stepsMotor * VAL_RAMP_PERCENT;
-        rampMotors[indexMotor].period = rampMotors[indexMotor].distRampSteps  / RAMP_DEFINITION;                    // el periodo es la cantidad de pasos dividido la resolucion de la rampa
-        rampMotors[indexMotor].dxdt = ceil( difVelocity / (float)RAMP_DEFINITION  );                                                // dxdt es la pendiente entre cada paso de la rampa
-
-        if(rampMotors[indexMotor].period == 0){
-            rampMotors[indexMotor].period = 1;
+        if( !rampMotors.individualRamp[indexMotor].dxdt ){
+            rampMotors.individualRamp[indexMotor].dxdt = 1;
         }
-        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "distRamp %ld,difVelocity %d, Periodo %d, dxdt: %d\n",rampMotors[indexMotor].distRampSteps,difVelocity,rampMotors[indexMotor].period,rampMotors[indexMotor].dxdt);
+
+        if(rampMotors.period == 0){
+            rampMotors.period = 1;
+            ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"ERROR PERIODO DE RAMPA MUY CHICO");
+        }
+        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "difVelocity %d,targetUs: %ld,actualUs: %ld, periodo: %ld, dxdt: %ld",difVelocity,rampMotors.individualRamp[indexMotor].targetVelUs , rampMotors.individualRamp[indexMotor].actualVelUs,rampMotors.period,rampMotors.individualRamp[indexMotor].dxdt);
     }
+    rampMotors.actualTime = 0;
+    rampMotors.stateRamp = RAMP_UP;
+    ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"STATE RAMP -> RAMP UP: %ld,vel0: %ld,vel1: %ld,vel2: %ld",rampMotors.actualTime,rampMotors.individualRamp[0].actualVelUs,rampMotors.individualRamp[1].actualVelUs,rampMotors.individualRamp[2].actualVelUs); // TODO: Eliminaar
+    gpio_set_level(22,1);
 }
 
-static void rampHandler(uint8_t indexMotor, uint32_t actualCont, uint32_t totalSteps){
+static void rampHandler(){
+    uint8_t indexMotor=0;
 
-    switch( rampMotors[indexMotor].stateRamp ){
+    rampMotors.actualTime += PERIOD_RAMP_HANDLER;
 
-        case RAMP_UP:
-            
-        //   if( motor.countSteps < rampa.distRampaSteps){           // dentro de la rampa de subida, debo chequear si no me estoy solapando con la rampa de bajada
-        //     rampa.stateRampa = RAMPA_BAJADA;
-        //   }
-            
-            if(( actualCont % rampMotors[indexMotor].period) == 0){
-                if( rampMotors[indexMotor].actualVelUs > rampMotors[indexMotor].targetVelUs){
-                    rampMotors[indexMotor].actualVelUs -= rampMotors[indexMotor].dxdt;
-                    reloadAlarm( indexMotor, rampMotors[indexMotor].actualVelUs ); 
+    if(( rampMotors.actualTime % rampMotors.period) == 0){
+
+        // ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"actualCont: %ld, period: %ld",rampMotors.actualTime, rampMotors.period);
+
+        switch( rampMotors.stateRamp ){
+
+            case RAMP_UP:
+                
+            //   if( motor.countSteps < rampa.distRampaSteps){           // dentro de la rampa de subida, debo chequear si no me estoy solapando con la rampa de bajada
+            //     rampa.stateRampa = RAMPA_BAJADA;
+            //   }
+                
+                if( rampMotors.actualTime < rampMotors.rampUpDownTime ){
+                    for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
+                        if( rampMotors.individualRamp[indexMotor].actualVelUs > rampMotors.individualRamp[indexMotor].targetVelUs){
+                            rampMotors.individualRamp[indexMotor].actualVelUs -= rampMotors.individualRamp[indexMotor].dxdt;
+                            reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs ); 
+                        }
+                    } 
                 }
                 else{
-                    rampMotors[indexMotor].stateRamp = RAMP_MESETA;
+                    rampMotors.stateRamp = RAMP_MESETA;
+                    ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"STATE RAMP -> RAMP MESETA: %ld,vel0: %ld,vel1: %ld,vel2: %ld",rampMotors.actualTime,rampMotors.individualRamp[0].actualVelUs,rampMotors.individualRamp[1].actualVelUs,rampMotors.individualRamp[2].actualVelUs); // TODO: Eliminaar
+                    gpio_set_level(22,0);
+                    for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
+                        rampMotors.individualRamp[indexMotor].actualVelUs = rampMotors.individualRamp[indexMotor].targetVelUs;
+                        reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs );
+                    }
+                } 
+            break;
+
+            case RAMP_MESETA:
+
+                if( rampMotors.actualTime >= ( rampMotors.rampUpDownTime + rampMotors.constantRampTime)){
+                    rampMotors.stateRamp = RAMP_DOWN;
+                    ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"STATE RAMP -> RAMP DOWN: %ld,vel0: %ld,vel1: %ld,vel2: %ld",rampMotors.actualTime,rampMotors.individualRamp[0].actualVelUs,rampMotors.individualRamp[1].actualVelUs,rampMotors.individualRamp[2].actualVelUs); // TODO: Eliminaar
+                    gpio_set_level(22,1);
                 }
-            }
-        break;
+            break;
 
-        case RAMP_MESETA:
+            case RAMP_DOWN:
 
-            if( actualCont > ( outputMotors.motorsControl[indexMotor].stepsMotor - rampMotors[indexMotor].distRampSteps)){
-                rampMotors[indexMotor].stateRamp = RAMP_DOWN;
-            }
-
-        break;
-
-        case RAMP_DOWN:
-
-            if(( actualCont % rampMotors[indexMotor].period) == 0){
-                if( rampMotors[indexMotor].actualVelUs < vel2us(1) ){
-                    rampMotors[indexMotor].actualVelUs += rampMotors[indexMotor].dxdt;
-                    reloadAlarm( indexMotor, rampMotors[indexMotor].actualVelUs );    
+                if( rampMotors.actualTime < rampMotors.rampTotalTime ){
+                    for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
+                        if( rampMotors.individualRamp[indexMotor].actualVelUs < vel2us(1) ){
+                            rampMotors.individualRamp[indexMotor].actualVelUs += rampMotors.individualRamp[indexMotor].dxdt;
+                            reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs );    
+                        }
+                    }
                 }
                 else{
-                    rampMotors[indexMotor].stateRamp = RAMP_MESETA;
+                    rampMotors.stateRamp = RAMP_END;
+                    ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"STATE RAMP -> RAMP END : %ld,vel0: %ld,vel1: %ld,vel2: %ld",rampMotors.actualTime,rampMotors.individualRamp[0].actualVelUs,rampMotors.individualRamp[1].actualVelUs,rampMotors.individualRamp[2].actualVelUs); // TODO: Eliminaar
+                    gpio_set_level(22,0);
+                    for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
+                        rampMotors.individualRamp[indexMotor].actualVelUs = vel2us(1);
+                        reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs );
+                    }
                 }
-            }
-        break;
-  }
+            break;
+        }
+    }
 }
 
 void calculateInterpolation( void ){
@@ -151,7 +189,7 @@ void calculateInterpolation( void ){
 
     for( indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++ ){ 
         outputMotors.motorsControl[indexMotor].velocityUs =  (uint32_t)(( maxSteps * vel2us(outputMotors.motorVelPercent)) / (float)outputMotors.motorsControl[indexMotor].stepsMotor );
-        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "INTERPOLATION: Max: %ld, act: %ld,vel:%ld",maxSteps,outputMotors.motorsControl[indexMotor].stepsMotor,outputMotors.motorsControl[indexMotor].velocityUs);
+        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "INTERPOLATION: Max: %ld steps, act: %ld steps,vel: %ldus",maxSteps,outputMotors.motorsControl[indexMotor].stepsMotor,outputMotors.motorsControl[indexMotor].velocityUs);
     }
 }
 
@@ -179,13 +217,15 @@ static void handlerQueueAxis(void *pvParameters){
                 }
 
                 calculateInterpolation();
-                setRampa();
+                calculateRamp();
+
+                // reloadAlarm( MOTOR_A, outputMotors.motorsControl[MOTOR_A].velocityUs );
+                // reloadAlarm( MOTOR_B, outputMotors.motorsControl[MOTOR_B].velocityUs );
+                // reloadAlarm( MOTOR_C, outputMotors.motorsControl[MOTOR_C].velocityUs );
 
                 outputMotors.motorsControl[MOTOR_A].flagRunning = true;
                 outputMotors.motorsControl[MOTOR_B].flagRunning = true;
-                outputMotors.motorsControl[MOTOR_C].flagRunning = true;
-
-                
+                outputMotors.motorsControl[MOTOR_C].flagRunning = true;      
             }
         }
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -213,10 +253,11 @@ void initMotors(output_motors_pins_t pinout){
         .resolution_hz = 1000000,
     };
 
-    // ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimer));
     ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerA));
     ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerB));
     ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerC));
+
+    ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerRamp));
     
     gptimer_event_callbacks_t newCallback ={
         .on_alarm = timerInterrupt,
@@ -225,6 +266,8 @@ void initMotors(output_motors_pins_t pinout){
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerA,&newCallback,NULL));
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerB,&newCallback,NULL));
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerC,&newCallback,NULL));
+
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerRamp,&newCallback,NULL));
     
     outputMotors.motorVelPercent = VEL_PERCENT_DEFAULT;
     setVel(outputMotors.motorVelPercent);                   // inician los motores con la velocidad default
@@ -232,9 +275,19 @@ void initMotors(output_motors_pins_t pinout){
     ESP_ERROR_CHECK(gptimer_enable(handleTimerA));
     ESP_ERROR_CHECK(gptimer_enable(handleTimerB));
     ESP_ERROR_CHECK(gptimer_enable(handleTimerC));
+    ESP_ERROR_CHECK(gptimer_enable(handleTimerRamp));
     ESP_ERROR_CHECK(gptimer_start(handleTimerA));
     ESP_ERROR_CHECK(gptimer_start(handleTimerB));
     ESP_ERROR_CHECK(gptimer_start(handleTimerC));
+    ESP_ERROR_CHECK(gptimer_start(handleTimerRamp));
+
+
+     gptimer_alarm_config_t alarm_config = {
+            .alarm_count = PERIOD_RAMP_HANDLER,
+            .reload_count = 0,
+            .flags.auto_reload_on_alarm = true,
+        };
+    gptimer_set_alarm_action(handleTimerRamp, &alarm_config);
 
     xTaskCreate(handlerQueueAxis,"axis Handler",4096,NULL,4,NULL);          // TODO: medir el tamaño de stack consumido
 }

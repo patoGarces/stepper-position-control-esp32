@@ -1,10 +1,21 @@
 #include "stdint.h"
 
-#define NO_DURATION     -1
-#define MIN_VELOCITY_US 1000
-#define MAX_VELOCITY_US 100     
+#define MIN_VELOCITY_US 5000
+#define MAX_VELOCITY_US 500     
 
 #define VEL_PERCENT_DEFAULT 25  // velocidad por defecto al iniciar los motores
+
+/* Cantidad de ticks hasta que se dispare la interrupcion */
+#define MOTOR_PERIOD_US     1000
+
+/* Definicion en la rampa, la velocidad tiene 1000 puntos de definicion*/
+#define RAMP_DEFINITION     100
+#define PERIOD_RAMP_HANDLER 10
+
+#define RAMP_MAX_ACCEL 5
+
+#define VAL_RAMP_PERCENT 0.1
+
 
 #define MOTOR_ENABLE    0
 #define MOTOR_DISABLE   1
@@ -23,7 +34,8 @@ enum motor_name {
 enum ramp_state {
     RAMP_UP,
     RAMP_MESETA,
-    RAMP_DOWN
+    RAMP_DOWN,
+    RAMP_END
 };
 
 typedef struct{
@@ -52,13 +64,21 @@ typedef struct{
     motor_control_t         motorsControl[CANT_MOTORS];
 }motors_control_t;
 
+
 typedef struct{
     uint16_t actualVelUs;
     uint16_t targetVelUs;
-    uint8_t  stateRamp;
-    uint32_t distRampSteps;
-    uint16_t period;
     uint16_t dxdt;
+}individual_ramp_t;
+
+typedef struct{
+    uint32_t actualTime;
+    uint32_t rampUpDownTime;
+    uint32_t constantRampTime;
+    uint32_t rampTotalTime;
+    uint16_t period;
+    uint8_t  stateRamp;
+    individual_ramp_t individualRamp[CANT_MOTORS];
 }control_ramp_t;
 
 void initMotors(output_motors_pins_t pinout);

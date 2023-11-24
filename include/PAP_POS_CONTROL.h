@@ -1,6 +1,6 @@
 #include "stdint.h"
 
-#define MIN_VELOCITY_US 5000
+#define MIN_VELOCITY_US 3000
 #define MAX_VELOCITY_US 500     
 
 #define VEL_PERCENT_DEFAULT 25  // velocidad por defecto al iniciar los motores
@@ -16,12 +16,10 @@
 
 #define VAL_RAMP_PERCENT 0.1
 
+// #define AVOID_ACCEL_RAMP 
 
 #define MOTOR_ENABLE    0
 #define MOTOR_DISABLE   1
-
-#define MOT_DIR_CCW     1
-#define MOT_DIR_CW      0
 
 #define CANT_MOTORS     3
 

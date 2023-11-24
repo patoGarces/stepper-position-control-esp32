@@ -114,15 +114,12 @@ static void rampHandler(){
     if(( rampMotors.actualTime % rampMotors.period) == 0){
 
         // ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"actualCont: %ld, period: %ld",rampMotors.actualTime, rampMotors.period);
-
         switch( rampMotors.stateRamp ){
 
-            case RAMP_UP:
-                
+            case RAMP_UP:   
             //   if( motor.countSteps < rampa.distRampaSteps){           // dentro de la rampa de subida, debo chequear si no me estoy solapando con la rampa de bajada
             //     rampa.stateRampa = RAMPA_BAJADA;
-            //   }
-                
+            //   }  
                 if( rampMotors.actualTime < rampMotors.rampUpDownTime ){
                     for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
                         if( rampMotors.individualRamp[indexMotor].actualVelUs > rampMotors.individualRamp[indexMotor].targetVelUs){
@@ -143,7 +140,6 @@ static void rampHandler(){
             break;
 
             case RAMP_MESETA:
-
                 if( rampMotors.actualTime >= ( rampMotors.rampUpDownTime + rampMotors.constantRampTime)){
                     rampMotors.stateRamp = RAMP_DOWN;
                     ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"STATE RAMP -> RAMP DOWN: %ld,vel0: %ld,vel1: %ld,vel2: %ld",rampMotors.actualTime,rampMotors.individualRamp[0].actualVelUs,rampMotors.individualRamp[1].actualVelUs,rampMotors.individualRamp[2].actualVelUs); // TODO: Eliminaar
@@ -152,7 +148,6 @@ static void rampHandler(){
             break;
 
             case RAMP_DOWN:
-
                 if( rampMotors.actualTime < rampMotors.rampTotalTime ){
                     for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
                         if( rampMotors.individualRamp[indexMotor].actualVelUs < vel2us(1) ){
@@ -177,13 +172,15 @@ static void rampHandler(){
 
 void calculateInterpolation( void ){
     uint32_t maxSteps = 0;
-    uint8_t indexMotor;
+    uint8_t indexMotor,indexMax=0;
+
 
     maxSteps = outputMotors.motorsControl[MOTOR_A].stepsMotor;
 
     for( indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++ ){ 
         if( outputMotors.motorsControl[indexMotor].stepsMotor > maxSteps ){
             maxSteps = outputMotors.motorsControl[indexMotor].stepsMotor;
+            indexMax = indexMotor;
         }
     }
 
@@ -191,6 +188,9 @@ void calculateInterpolation( void ){
         outputMotors.motorsControl[indexMotor].velocityUs =  (uint32_t)(( maxSteps * vel2us(outputMotors.motorVelPercent)) / (float)outputMotors.motorsControl[indexMotor].stepsMotor );
         ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "INTERPOLATION: Max: %ld steps, act: %ld steps,vel: %ldus",maxSteps,outputMotors.motorsControl[indexMotor].stepsMotor,outputMotors.motorsControl[indexMotor].velocityUs);
     }
+    outputMotors.motorsControl[indexMax].velocityUs = MAX_VELOCITY_US*0.95;
+     ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "%ld, %ld , %ld ",outputMotors.motorsControl[0].velocityUs,outputMotors.motorsControl[1].velocityUs,outputMotors.motorsControl[2].velocityUs);
+    
 }
 
 static void handlerQueueAxis(void *pvParameters){
@@ -217,15 +217,18 @@ static void handlerQueueAxis(void *pvParameters){
                 }
 
                 calculateInterpolation();
-                calculateRamp();
 
-                // reloadAlarm( MOTOR_A, outputMotors.motorsControl[MOTOR_A].velocityUs );
-                // reloadAlarm( MOTOR_B, outputMotors.motorsControl[MOTOR_B].velocityUs );
-                // reloadAlarm( MOTOR_C, outputMotors.motorsControl[MOTOR_C].velocityUs );
+                #ifndef AVOID_ACCEL_RAMP
+                    calculateRamp();
+                #else
+                    reloadAlarm( MOTOR_A, outputMotors.motorsControl[MOTOR_A].velocityUs );
+                    reloadAlarm( MOTOR_B, outputMotors.motorsControl[MOTOR_B].velocityUs );
+                    reloadAlarm( MOTOR_C, outputMotors.motorsControl[MOTOR_C].velocityUs );
+                #endif 
 
                 outputMotors.motorsControl[MOTOR_A].flagRunning = true;
                 outputMotors.motorsControl[MOTOR_B].flagRunning = true;
-                outputMotors.motorsControl[MOTOR_C].flagRunning = true;      
+                outputMotors.motorsControl[MOTOR_C].flagRunning = true;   
             }
         }
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -256,8 +259,6 @@ void initMotors(output_motors_pins_t pinout){
     ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerA));
     ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerB));
     ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerC));
-
-    ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerRamp));
     
     gptimer_event_callbacks_t newCallback ={
         .on_alarm = timerInterrupt,
@@ -266,8 +267,6 @@ void initMotors(output_motors_pins_t pinout){
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerA,&newCallback,NULL));
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerB,&newCallback,NULL));
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerC,&newCallback,NULL));
-
-    ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerRamp,&newCallback,NULL));
     
     outputMotors.motorVelPercent = VEL_PERCENT_DEFAULT;
     setVel(outputMotors.motorVelPercent);                   // inician los motores con la velocidad default
@@ -275,12 +274,16 @@ void initMotors(output_motors_pins_t pinout){
     ESP_ERROR_CHECK(gptimer_enable(handleTimerA));
     ESP_ERROR_CHECK(gptimer_enable(handleTimerB));
     ESP_ERROR_CHECK(gptimer_enable(handleTimerC));
-    ESP_ERROR_CHECK(gptimer_enable(handleTimerRamp));
     ESP_ERROR_CHECK(gptimer_start(handleTimerA));
     ESP_ERROR_CHECK(gptimer_start(handleTimerB));
     ESP_ERROR_CHECK(gptimer_start(handleTimerC));
-    ESP_ERROR_CHECK(gptimer_start(handleTimerRamp));
 
+    #ifndef AVOID_ACCEL_RAMP
+        ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerRamp));
+        ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerRamp,&newCallback,NULL));
+        ESP_ERROR_CHECK(gptimer_enable(handleTimerRamp));
+        ESP_ERROR_CHECK(gptimer_start(handleTimerRamp));
+    #endif
 
      gptimer_alarm_config_t alarm_config = {
             .alarm_count = PERIOD_RAMP_HANDLER,

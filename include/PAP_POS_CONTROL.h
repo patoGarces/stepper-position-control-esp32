@@ -66,7 +66,8 @@ typedef struct{
 typedef struct{
     uint16_t actualVelUs;
     uint16_t targetVelUs;
-    uint16_t dxdt;
+    // uint16_t dxdt;
+    float accelMax;
 }individual_ramp_t;
 
 typedef struct{

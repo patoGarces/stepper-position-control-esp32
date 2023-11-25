@@ -66,13 +66,22 @@ static void generateStep( uint8_t indexMotor ){
     }
 }
 
+// ActualVel	Arranca de 1%
+// targetVel	Depende de la interpolacion
+// AcelMax	(velMax-velMin)*2 / deltaT
+	
+// Columna t	actualCont
+// Columna Acel	(acelMax*period)/deltaT
+// columna vel	vel_inic + (accelMax*actualCont*actualCont*0,5)/deltaT 
+
+
 static void calculateRamp( void ){
     uint8_t indexMotor=0;
-    uint16_t difVelocity=0;
+    float difVelocity=0;
 
     rampMotors.rampTotalTime = outputMotors.motorsControl[indexMotor].velocityUs * outputMotors.motorsControl[indexMotor].stepsMotor;
     rampMotors.rampUpDownTime =  rampMotors.rampTotalTime * VAL_RAMP_PERCENT;
-    rampMotors.constantRampTime = rampMotors.rampTotalTime * ( 1.17 - (2*VAL_RAMP_PERCENT));        // 1.17 Deberia ser 1.00, pero termina la rampa antes que los pasos, con este offset queda sincronizado
+    rampMotors.constantRampTime = rampMotors.rampTotalTime * ( 1.00 - (2*VAL_RAMP_PERCENT)); 
 
     rampMotors.period = rampMotors.rampUpDownTime / RAMP_DEFINITION;
     ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "Calculo constantes rampa-> totalTime: %ld, t1: %ld, t2: %ld",rampMotors.rampTotalTime,rampMotors.rampUpDownTime, rampMotors.constantRampTime );
@@ -80,25 +89,28 @@ static void calculateRamp( void ){
     for( indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){ 
 
         rampMotors.individualRamp[indexMotor].actualVelUs = vel2us(1);    
-        rampMotors.individualRamp[indexMotor].targetVelUs = outputMotors.motorsControl[indexMotor].velocityUs;
-        difVelocity = abs(rampMotors.individualRamp[indexMotor].actualVelUs -  rampMotors.individualRamp[indexMotor].targetVelUs);
-        if( difVelocity == 0 ){
-            difVelocity = 1;
-            ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"ERROR DIF DE VELOCIDAD MUY CHICA");
-        }  
-        reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs );
+        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "outputMotores velocityUs: %ld",outputMotors.motorsControl[indexMotor].velocityUs);
         
-        rampMotors.individualRamp[indexMotor].dxdt = ceil(difVelocity / RAMP_DEFINITION) ;
+        rampMotors.individualRamp[indexMotor].targetVelUs = outputMotors.motorsControl[indexMotor].velocityUs;
+        difVelocity = rampMotors.individualRamp[indexMotor].targetVelUs- rampMotors.individualRamp[indexMotor].actualVelUs;
 
-        if( !rampMotors.individualRamp[indexMotor].dxdt ){
-            rampMotors.individualRamp[indexMotor].dxdt = 1;
-        }
+        reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs );
 
-        if(rampMotors.period == 0){
-            rampMotors.period = 1;
-            ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"ERROR PERIODO DE RAMPA MUY CHICO");
-        }
-        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "difVelocity %d,targetUs: %ld,actualUs: %ld, periodo: %ld, dxdt: %ld",difVelocity,rampMotors.individualRamp[indexMotor].targetVelUs , rampMotors.individualRamp[indexMotor].actualVelUs,rampMotors.period,rampMotors.individualRamp[indexMotor].dxdt);
+        rampMotors.individualRamp[indexMotor].accelMax = (difVelocity*2.00) / rampMotors.rampUpDownTime;
+
+        printf("accelMax -> difVelocity: %f, t1: %ld,accelMax: %f\n",difVelocity,rampMotors.rampUpDownTime, rampMotors.individualRamp[indexMotor].accelMax);
+        
+        // rampMotors.individualRamp[indexMotor].dxdt = ceil(difVelocity / RAMP_DEFINITION) ;
+
+        // if( !rampMotors.individualRamp[indexMotor].dxdt ){
+        //     rampMotors.individualRamp[indexMotor].dxdt = 1;
+        // }
+
+        // if(rampMotors.period == 0){
+        //     rampMotors.period = 1;
+        //     ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"ERROR PERIODO DE RAMPA MUY CHICO");
+        // }
+        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "targetUs: %ld,actualUs: %ld, periodo: %ld",rampMotors.individualRamp[indexMotor].targetVelUs , rampMotors.individualRamp[indexMotor].actualVelUs,rampMotors.period);
     }
     rampMotors.actualTime = 0;
     rampMotors.stateRamp = RAMP_UP;
@@ -123,7 +135,7 @@ static void rampHandler(){
                 if( rampMotors.actualTime < rampMotors.rampUpDownTime ){
                     for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
                         if( rampMotors.individualRamp[indexMotor].actualVelUs > rampMotors.individualRamp[indexMotor].targetVelUs){
-                            rampMotors.individualRamp[indexMotor].actualVelUs -= rampMotors.individualRamp[indexMotor].dxdt;
+                            rampMotors.individualRamp[indexMotor].actualVelUs = vel2us(1) + ( rampMotors.individualRamp[indexMotor].accelMax*rampMotors.actualTime*rampMotors.actualTime*0.5)/(float)rampMotors.rampUpDownTime; 
                             reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs ); 
                         }
                     } 
@@ -151,7 +163,7 @@ static void rampHandler(){
                 if( rampMotors.actualTime < rampMotors.rampTotalTime ){
                     for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
                         if( rampMotors.individualRamp[indexMotor].actualVelUs < vel2us(1) ){
-                            rampMotors.individualRamp[indexMotor].actualVelUs += rampMotors.individualRamp[indexMotor].dxdt;
+                            rampMotors.individualRamp[indexMotor].actualVelUs =  vel2us(1) - ( rampMotors.individualRamp[indexMotor].accelMax*rampMotors.actualTime*rampMotors.actualTime*0.5)/rampMotors.rampUpDownTime;
                             reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs );    
                         }
                     }
@@ -172,15 +184,13 @@ static void rampHandler(){
 
 void calculateInterpolation( void ){
     uint32_t maxSteps = 0;
-    uint8_t indexMotor,indexMax=0;
-
+    uint8_t indexMotor;
 
     maxSteps = outputMotors.motorsControl[MOTOR_A].stepsMotor;
 
     for( indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++ ){ 
         if( outputMotors.motorsControl[indexMotor].stepsMotor > maxSteps ){
             maxSteps = outputMotors.motorsControl[indexMotor].stepsMotor;
-            indexMax = indexMotor;
         }
     }
 
@@ -188,9 +198,6 @@ void calculateInterpolation( void ){
         outputMotors.motorsControl[indexMotor].velocityUs =  (uint32_t)(( maxSteps * vel2us(outputMotors.motorVelPercent)) / (float)outputMotors.motorsControl[indexMotor].stepsMotor );
         ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "INTERPOLATION: Max: %ld steps, act: %ld steps,vel: %ldus",maxSteps,outputMotors.motorsControl[indexMotor].stepsMotor,outputMotors.motorsControl[indexMotor].velocityUs);
     }
-    outputMotors.motorsControl[indexMax].velocityUs = MAX_VELOCITY_US*0.95;
-     ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "%ld, %ld , %ld ",outputMotors.motorsControl[0].velocityUs,outputMotors.motorsControl[1].velocityUs,outputMotors.motorsControl[2].velocityUs);
-    
 }
 
 static void handlerQueueAxis(void *pvParameters){

@@ -10,53 +10,48 @@
 
 #define PAP_POS_CONTROL_TAL "PAP_POS_CONTROL"
 
-
 QueueHandle_t       handleMoveAxis;
 SemaphoreHandle_t   handleSyncMovement;
 motors_control_t    outputMotors;
 control_ramp_t      rampMotors;
 
-gptimer_handle_t    handleTimerA = NULL;
-gptimer_handle_t    handleTimerB = NULL;
-gptimer_handle_t    handleTimerC = NULL;
-gptimer_handle_t    handleTimerRamp = NULL;
+gptimer_handle_t    handleBaseTimer = NULL;
 
 // TODO: bug: a alta velocidad el motor de mayor recorrido no se mueve
 
-
 static void generateStep( uint8_t indexMotor );
 static uint16_t vel2us( uint8_t velInPercent);
-static void reloadAlarm( uint8_t indexMotor, uint16_t velocity );
 static void rampHandler( void );
 static void calculateRamp( void );
 
 
 static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx) {
+    uint8_t indexMotor;
 
-    if( timer == handleTimerA ){
-        generateStep(MOTOR_A); 
-    }
-    else if( timer == handleTimerB ){
-        generateStep(MOTOR_B);
-    }
-    else if( timer == handleTimerC ){
-        generateStep(MOTOR_C);
-    }
-    else{
-        if( outputMotors.motorsControl[MOTOR_A].flagRunning){
-            rampHandler();
+    for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
+        outputMotors.motorsControl[indexMotor].actualTicks += PERIOD_RAMP_HANDLER;
+
+        if( outputMotors.motorsControl[indexMotor].actualTicks > outputMotors.motorsControl[indexMotor].velocityUs){
+            outputMotors.motorsControl[indexMotor].actualTicks = 0;
+            generateStep(indexMotor);
         }
     }
-    return  false;
+    #ifndef AVOID_ACCEL_RAMP
+    if( outputMotors.motorsControl[MOTOR_A].flagRunning ||
+        outputMotors.motorsControl[MOTOR_B].flagRunning ||
+        outputMotors.motorsControl[MOTOR_C].flagRunning ){
+        rampHandler();
+    }
+    #endif
+    
+    return false;
 }
 
 static void generateStep( uint8_t indexMotor ){
 
     if( outputMotors.motorsControl[indexMotor].flagRunning ){
-
-        if(outputMotors.motorsControl[indexMotor].contMotor < outputMotors.motorsControl[indexMotor].stepsMotor){
-
-            outputMotors.motorsControl[indexMotor].contMotor++;
+        if(outputMotors.motorsControl[indexMotor].actualSteps < outputMotors.motorsControl[indexMotor].totalSteps){
+            outputMotors.motorsControl[indexMotor].actualSteps++;
             gpio_set_level(outputMotors.motorsGpio.motors[indexMotor].stepPin,outputMotors.motorsControl[indexMotor].flagToggle);
             outputMotors.motorsControl[indexMotor].flagToggle = !outputMotors.motorsControl[indexMotor].flagToggle;  
         }
@@ -70,7 +65,7 @@ static void calculateRamp( void ){
     uint8_t indexMotor=0;
     uint16_t difVelocity=0;
 
-    rampMotors.rampTotalTime = outputMotors.motorsControl[indexMotor].velocityUs * outputMotors.motorsControl[indexMotor].stepsMotor;
+    rampMotors.rampTotalTime = outputMotors.motorsControl[indexMotor].velocityUs * outputMotors.motorsControl[indexMotor].totalSteps;
     rampMotors.rampUpDownTime =  rampMotors.rampTotalTime * VAL_RAMP_PERCENT;
     rampMotors.constantRampTime = rampMotors.rampTotalTime * ( 1.17 - (2*VAL_RAMP_PERCENT));        // 1.17 Deberia ser 1.00, pero termina la rampa antes que los pasos, con este offset queda sincronizado
 
@@ -85,8 +80,9 @@ static void calculateRamp( void ){
         if( difVelocity == 0 ){
             difVelocity = 1;
             ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"ERROR DIF DE VELOCIDAD MUY CHICA");
-        }  
-        reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs );
+        }
+        
+        outputMotors.motorsControl[indexMotor].velocityUs = rampMotors.individualRamp[indexMotor].actualVelUs;
         
         rampMotors.individualRamp[indexMotor].dxdt = ceil(difVelocity / RAMP_DEFINITION) ;
 
@@ -124,7 +120,7 @@ static void rampHandler(){
                     for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
                         if( rampMotors.individualRamp[indexMotor].actualVelUs > rampMotors.individualRamp[indexMotor].targetVelUs){
                             rampMotors.individualRamp[indexMotor].actualVelUs -= rampMotors.individualRamp[indexMotor].dxdt;
-                            reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs ); 
+                            outputMotors.motorsControl[indexMotor].velocityUs = rampMotors.individualRamp[indexMotor].actualVelUs; 
                         }
                     } 
                 }
@@ -134,7 +130,7 @@ static void rampHandler(){
                     gpio_set_level(22,0);
                     for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
                         rampMotors.individualRamp[indexMotor].actualVelUs = rampMotors.individualRamp[indexMotor].targetVelUs;
-                        reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs );
+                        outputMotors.motorsControl[indexMotor].velocityUs = rampMotors.individualRamp[indexMotor].actualVelUs;
                     }
                 } 
             break;
@@ -152,7 +148,7 @@ static void rampHandler(){
                     for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
                         if( rampMotors.individualRamp[indexMotor].actualVelUs < vel2us(1) ){
                             rampMotors.individualRamp[indexMotor].actualVelUs += rampMotors.individualRamp[indexMotor].dxdt;
-                            reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs );    
+                            outputMotors.motorsControl[indexMotor].velocityUs = rampMotors.individualRamp[indexMotor].actualVelUs;    
                         }
                     }
                 }
@@ -162,7 +158,7 @@ static void rampHandler(){
                     gpio_set_level(22,0);
                     for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
                         rampMotors.individualRamp[indexMotor].actualVelUs = vel2us(1);
-                        reloadAlarm( indexMotor, rampMotors.individualRamp[indexMotor].actualVelUs );
+                        outputMotors.motorsControl[indexMotor].velocityUs = rampMotors.individualRamp[indexMotor].actualVelUs;
                     }
                 }
             break;
@@ -175,18 +171,18 @@ void calculateInterpolation( void ){
     uint8_t indexMotor,indexMax=0;
 
 
-    maxSteps = outputMotors.motorsControl[MOTOR_A].stepsMotor;
+    maxSteps = outputMotors.motorsControl[MOTOR_A].totalSteps;
 
     for( indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++ ){ 
-        if( outputMotors.motorsControl[indexMotor].stepsMotor > maxSteps ){
-            maxSteps = outputMotors.motorsControl[indexMotor].stepsMotor;
+        if( outputMotors.motorsControl[indexMotor].totalSteps > maxSteps ){
+            maxSteps = outputMotors.motorsControl[indexMotor].totalSteps;
             indexMax = indexMotor;
         }
     }
 
     for( indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++ ){ 
-        outputMotors.motorsControl[indexMotor].velocityUs =  (uint32_t)(( maxSteps * vel2us(outputMotors.motorVelPercent)) / (float)outputMotors.motorsControl[indexMotor].stepsMotor );
-        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "INTERPOLATION: Max: %ld steps, act: %ld steps,vel: %ldus",maxSteps,outputMotors.motorsControl[indexMotor].stepsMotor,outputMotors.motorsControl[indexMotor].velocityUs);
+        outputMotors.motorsControl[indexMotor].velocityUs =  (uint32_t)(( maxSteps * vel2us(outputMotors.motorVelPercent)) / (float)outputMotors.motorsControl[indexMotor].totalSteps );
+        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "INTERPOLATION: Max: %ld steps, act: %ld steps,vel: %ldus",maxSteps,outputMotors.motorsControl[indexMotor].totalSteps,outputMotors.motorsControl[indexMotor].velocityUs);
     }
     outputMotors.motorsControl[indexMax].velocityUs = MAX_VELOCITY_US*0.95;
      ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "%ld, %ld , %ld ",outputMotors.motorsControl[0].velocityUs,outputMotors.motorsControl[1].velocityUs,outputMotors.motorsControl[2].velocityUs);
@@ -220,11 +216,7 @@ static void handlerQueueAxis(void *pvParameters){
 
                 #ifndef AVOID_ACCEL_RAMP
                     calculateRamp();
-                #else
-                    reloadAlarm( MOTOR_A, outputMotors.motorsControl[MOTOR_A].velocityUs );
-                    reloadAlarm( MOTOR_B, outputMotors.motorsControl[MOTOR_B].velocityUs );
-                    reloadAlarm( MOTOR_C, outputMotors.motorsControl[MOTOR_C].velocityUs );
-                #endif 
+                #endif
 
                 outputMotors.motorsControl[MOTOR_A].flagRunning = true;
                 outputMotors.motorsControl[MOTOR_B].flagRunning = true;
@@ -236,7 +228,6 @@ static void handlerQueueAxis(void *pvParameters){
 }
 
 void initMotors(output_motors_pins_t pinout){
-
     uint8_t motor;
 
     outputMotors.motorsGpio = pinout;
@@ -250,97 +241,54 @@ void initMotors(output_motors_pins_t pinout){
     setDisableMotors();
 
     gptimer_config_t timerConfig = {
-
         .clk_src = GPTIMER_CLK_SRC_DEFAULT,
         .direction = GPTIMER_COUNT_UP,
         .resolution_hz = 1000000,
     };
 
-    ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerA));
-    ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerB));
-    ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerC));
+    ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleBaseTimer));
     
     gptimer_event_callbacks_t newCallback ={
         .on_alarm = timerInterrupt,
     };
 
-    ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerA,&newCallback,NULL));
-    ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerB,&newCallback,NULL));
-    ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerC,&newCallback,NULL));
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleBaseTimer,&newCallback,NULL));
     
     outputMotors.motorVelPercent = VEL_PERCENT_DEFAULT;
     setVel(outputMotors.motorVelPercent);                   // inician los motores con la velocidad default
 
-    ESP_ERROR_CHECK(gptimer_enable(handleTimerA));
-    ESP_ERROR_CHECK(gptimer_enable(handleTimerB));
-    ESP_ERROR_CHECK(gptimer_enable(handleTimerC));
-    ESP_ERROR_CHECK(gptimer_start(handleTimerA));
-    ESP_ERROR_CHECK(gptimer_start(handleTimerB));
-    ESP_ERROR_CHECK(gptimer_start(handleTimerC));
+    ESP_ERROR_CHECK(gptimer_enable(handleBaseTimer));
+    ESP_ERROR_CHECK(gptimer_start(handleBaseTimer));
 
-    #ifndef AVOID_ACCEL_RAMP
-        ESP_ERROR_CHECK(gptimer_new_timer(&timerConfig,&handleTimerRamp));
-        ESP_ERROR_CHECK(gptimer_register_event_callbacks(handleTimerRamp,&newCallback,NULL));
-        ESP_ERROR_CHECK(gptimer_enable(handleTimerRamp));
-        ESP_ERROR_CHECK(gptimer_start(handleTimerRamp));
-    #endif
-
-     gptimer_alarm_config_t alarm_config = {
-            .alarm_count = PERIOD_RAMP_HANDLER,
-            .reload_count = 0,
-            .flags.auto_reload_on_alarm = true,
-        };
-    gptimer_set_alarm_action(handleTimerRamp, &alarm_config);
-
+    gptimer_alarm_config_t alarm_config = {
+        .alarm_count = BASE_PERIOD_TIMER,
+        .reload_count = 0,
+        .flags.auto_reload_on_alarm = true,
+    };
+    gptimer_set_alarm_action(handleBaseTimer, &alarm_config);
+    
     xTaskCreate(handlerQueueAxis,"axis Handler",4096,NULL,4,NULL);          // TODO: medir el tamaño de stack consumido
 }
 
-static void reloadAlarm( uint8_t indexMotor, uint16_t velocityUs ){
-    // uint16_t velocityUs = 0;
-
-    // if(velocity > 0 && velocity <= RAMP_DEFINITION){
-        // velocityUs = MAX_VELOCITY_US + (((MIN_VELOCITY_US-MAX_VELOCITY_US)*(RAMP_DEFINITION-velocity))/RAMP_DEFINITION);
-        // velocityUs = velocity;
-        // ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"motor %d: velocity: %d,salida: %d\n",indexMotor,velocity,velocityUs );
-
-        gptimer_alarm_config_t alarm_config = {
-            .alarm_count = velocityUs,
-            .reload_count = 0,
-            .flags.auto_reload_on_alarm = true,
-        };
-        switch ( indexMotor ){
-            case MOTOR_A:
-                gptimer_set_alarm_action(handleTimerA, &alarm_config);
-            break;
-            case MOTOR_B:
-                gptimer_set_alarm_action(handleTimerB, &alarm_config);
-            break;
-            case MOTOR_C:
-                gptimer_set_alarm_action(handleTimerC, &alarm_config);
-            break;
-        }
-    // } 
-}
 
 void moveAxis(int32_t stepsA,int32_t stepsB,int32_t stepsC){
-    
     motor_control_t newMovement[3];
 
     newMovement[MOTOR_A].dir = stepsA > 0;
-    newMovement[MOTOR_A].stepsMotor = abs(stepsA *2);
-    newMovement[MOTOR_A].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
+    newMovement[MOTOR_A].totalSteps = abs(stepsA *2);
+    newMovement[MOTOR_A].actualSteps = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
     newMovement[MOTOR_A].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_A].flagRunning = false;
 
     newMovement[MOTOR_B].dir = stepsB > 0;
-    newMovement[MOTOR_B].stepsMotor = abs(stepsB *2);
-    newMovement[MOTOR_B].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
+    newMovement[MOTOR_B].totalSteps = abs(stepsB *2);
+    newMovement[MOTOR_B].actualSteps = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
     newMovement[MOTOR_B].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_B].flagRunning = false;
 
     newMovement[MOTOR_C].dir = stepsC > 0;
-    newMovement[MOTOR_C].stepsMotor = abs(stepsC *2);
-    newMovement[MOTOR_C].contMotor = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
+    newMovement[MOTOR_C].totalSteps = abs(stepsC *2);
+    newMovement[MOTOR_C].actualSteps = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
     newMovement[MOTOR_C].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_C].flagRunning = false;
 

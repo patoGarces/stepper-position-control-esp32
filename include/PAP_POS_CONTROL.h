@@ -12,6 +12,8 @@
 #define RAMP_DEFINITION     100
 #define PERIOD_RAMP_HANDLER 10
 
+#define BASE_PERIOD_TIMER   10
+
 #define RAMP_MAX_ACCEL 5
 
 #define VAL_RAMP_PERCENT 0.1
@@ -49,10 +51,11 @@ typedef struct{
 typedef struct{
     uint16_t    velocityUs;
     uint8_t     dir;
-    uint32_t    contMotor;
-    uint32_t    stepsMotor;
+    uint32_t    actualSteps;
+    uint32_t    totalSteps;
     uint8_t     flagRunning;
     uint8_t     flagToggle;
+    uint32_t    actualTicks;
 }motor_control_t;
 
 typedef struct{

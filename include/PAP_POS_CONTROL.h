@@ -5,12 +5,8 @@
 
 #define VEL_PERCENT_DEFAULT 25  // velocidad por defecto al iniciar los motores
 
-/* Cantidad de ticks hasta que se dispare la interrupcion */
-#define MOTOR_PERIOD_US     1000
-
 /* Definicion en la rampa, la velocidad tiene 1000 puntos de definicion*/
 #define RAMP_DEFINITION     100
-#define PERIOD_RAMP_HANDLER 10
 
 #define BASE_PERIOD_TIMER   10
 
@@ -49,8 +45,17 @@ typedef struct{
 }output_motors_pins_t;
 
 typedef struct{
-    uint16_t    velocityUs;
+    int32_t safetyLimit[CANT_MOTORS];
+}safety_limits_t;
+
+typedef struct{
+    output_motors_pins_t    motorsGpio;
+    safety_limits_t         safetyLimits;      
+}pap_position_control_config_t;
+
+typedef struct{
     uint8_t     dir;
+    uint16_t    velocityUs;
     uint32_t    actualSteps;
     uint32_t    totalSteps;
     uint8_t     flagRunning;
@@ -58,13 +63,13 @@ typedef struct{
     uint32_t    actualTicks;
 }motor_control_t;
 
+
 typedef struct{
     uint8_t                 motorVelPercent;
     uint8_t                 motorsEnable;
-    output_motors_pins_t    motorsGpio;
+    int32_t                 absolutePosition[CANT_MOTORS];
     motor_control_t         motorsControl[CANT_MOTORS];
 }motors_control_t;
-
 
 typedef struct{
     uint16_t actualVelUs;
@@ -82,9 +87,16 @@ typedef struct{
     individual_ramp_t individualRamp[CANT_MOTORS];
 }control_ramp_t;
 
-void initMotors(output_motors_pins_t pinout);
+typedef struct{
+    int32_t absPosition[CANT_MOTORS];
+}absolute_position_t;
+
+void initMotors(pap_position_control_config_t config);
 void moveAxis(int32_t stepsA,int32_t stepsB,int32_t stepsC);
 void setVel(uint8_t velocity);
 void setEnableMotors(void);
 void setDisableMotors(void);
 uint8_t getVelPercent(void);
+void resetAbsPosition(void);
+absolute_position_t getAbsPosition(void);
+uint8_t areMotorsMoving(void);

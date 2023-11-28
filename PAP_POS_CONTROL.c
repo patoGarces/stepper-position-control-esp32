@@ -370,12 +370,22 @@ uint8_t areMotorsMoving(void){
 
 void autoHome(void){
     uint8_t indexMotor = 0,toggle=0;
-    
-    // TODO: contemplar que pasa si esta pisado el sensor
 
     if(outputMotors.motorsEnable == MOTOR_DISABLE){
         ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"Motores deshabilitados no se puede realizar el autohome");
         return;
+    }
+
+    for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
+        outputMotors.motorsControl[indexMotor].dir = !DIRECTION_SEARCH_HOME;
+        gpio_set_level(hardwareConfig.motorsGpio.motors[indexMotor].dirPin,outputMotors.motorsControl[indexMotor].dir);
+
+        while( !gpio_get_level(hardwareConfig.endOfTravelsGpio.pinSensor[indexMotor]) ){
+
+            gpio_set_level(hardwareConfig.motorsGpio.motors[indexMotor].stepPin,toggle);
+            toggle =! toggle;
+            vTaskDelay(1);
+        }
     }
 
     for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){

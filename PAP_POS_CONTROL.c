@@ -24,6 +24,7 @@ static void generateStep( uint8_t indexMotor );
 static uint16_t vel2us( uint8_t velInPercent);
 static void rampHandler( void );
 static void calculateRamp( void );
+void errorLimitsExcedeed(uint8_t indexMotor, int32_t actualStep, int32_t safetyLimit);
 
 static bool IRAM_ATTR timerInterrupt(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx) {
     uint8_t indexMotor;
@@ -55,21 +56,25 @@ static void generateStep( uint8_t indexMotor ){
             gpio_set_level(hardwareConfig.motorsGpio.motors[indexMotor].stepPin,outputMotors.motorsControl[indexMotor].flagToggle);
             outputMotors.motorsControl[indexMotor].flagToggle = !outputMotors.motorsControl[indexMotor].flagToggle;  
 
-            if( outputMotors.motorsControl[indexMotor].dir && outputMotors.absolutePosition[indexMotor] < hardwareConfig.safetyLimits.safetyLimit[indexMotor]){
+            if( outputMotors.motorsControl[indexMotor].dir && (outputMotors.absolutePosition[indexMotor] < hardwareConfig.safetyLimits.safetyLimit[indexMotor]) ){
                 outputMotors.absolutePosition[indexMotor]++;
             }
-            else if( !outputMotors.motorsControl[indexMotor].dir && outputMotors.absolutePosition[indexMotor] > 0 ){
+            else if( !outputMotors.motorsControl[indexMotor].dir &&  (outputMotors.absolutePosition[indexMotor] > 0) ){
                 outputMotors.absolutePosition[indexMotor]--;
             }
             else{
-                outputMotors.motorsControl[indexMotor].flagRunning = false;
-                ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"ERROR LIMITE VIRTUAL DE SEGURIDAD MOTOR: %d",indexMotor);
+                 errorLimitsExcedeed(indexMotor,outputMotors.absolutePosition[indexMotor], hardwareConfig.safetyLimits.safetyLimit[indexMotor]);
             }
         }
         else{ 
             outputMotors.motorsControl[indexMotor].flagRunning = false;
         }
     }
+}
+
+void errorLimitsExcedeed(uint8_t indexMotor, int32_t actualStep, int32_t safetyLimit){
+    ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"ERROR LIMITE VIRTUAL DE SEGURIDAD MOTOR: %d , absPos: %ld,safetyLimit: %ld",indexMotor,actualStep,safetyLimit);
+    outputMotors.motorsControl[indexMotor].flagRunning = false;      
 }
 
 static void calculateRamp( void ){
@@ -197,7 +202,7 @@ static void handlerQueueAxis(void *pvParameters){
     motor_control_t receiveNewMovement[3];
     uint8_t indexMotor;
 
-    handleMoveAxis = xQueueCreate(100,sizeof(motors_control_t));
+    handleMoveAxis = xQueueCreate(QUEUE_MOVES_LENGTH,sizeof(motors_control_t));
 
     while(1){
 
@@ -234,12 +239,13 @@ void initMotors(pap_position_control_config_t config){
     uint8_t indexMotor;
 
     hardwareConfig.motorsGpio = config.motorsGpio;
-    hardwareConfig.safetyLimits = config.safetyLimits;
 
     gpio_set_direction( hardwareConfig.motorsGpio.enablePin,GPIO_MODE_OUTPUT );
     for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
         gpio_set_direction( hardwareConfig.motorsGpio.motors[indexMotor].dirPin,GPIO_MODE_OUTPUT );
         gpio_set_direction( hardwareConfig.motorsGpio.motors[indexMotor].stepPin,GPIO_MODE_OUTPUT );
+
+        hardwareConfig.safetyLimits.safetyLimit[indexMotor] = config.safetyLimits.safetyLimit[indexMotor] * 2;
     }
 
     setDisableMotors();
@@ -276,29 +282,43 @@ void initMotors(pap_position_control_config_t config){
 }
 
 
-void moveAxis(int32_t stepsA,int32_t stepsB,int32_t stepsC){
+uint8_t moveAxis(int32_t stepsA,int32_t stepsB,int32_t stepsC){
     motor_control_t newMovement[3];
 
     newMovement[MOTOR_A].dir = stepsA > 0;
     newMovement[MOTOR_A].totalSteps = abs(stepsA *2);
-    newMovement[MOTOR_A].actualSteps = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
+    newMovement[MOTOR_A].actualSteps = 0;
     newMovement[MOTOR_A].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_A].flagRunning = false;
 
     newMovement[MOTOR_B].dir = stepsB > 0;
     newMovement[MOTOR_B].totalSteps = abs(stepsB *2);
-    newMovement[MOTOR_B].actualSteps = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
+    newMovement[MOTOR_B].actualSteps = 0;
     newMovement[MOTOR_B].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_B].flagRunning = false;
 
     newMovement[MOTOR_C].dir = stepsC > 0;
     newMovement[MOTOR_C].totalSteps = abs(stepsC *2);
-    newMovement[MOTOR_C].actualSteps = 0;               // Util si quiero hacer movimientos relativos,cargando steps anteriores..
+    newMovement[MOTOR_C].actualSteps = 0;
     newMovement[MOTOR_C].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_C].flagRunning = false;
 
-    xQueueSend(handleMoveAxis,&newMovement,0);
-    printf("Nuevo movimiento agregado a la cola,pendientes: %d\n",uxQueueMessagesWaiting( handleMoveAxis )); 
+    // absolute_position_t actualPosition = getAbsPosition();
+    // for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
+    //     if((newMovement[indexMotor].totalSteps + actualPosition.absPosition[indexMotor]) > hardwareConfig.safetyLimits.safetyLimit[indexMotor]){
+    //         ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"ERROR LIMITES DE SEGURIDAD");
+    //         return MOVE_AXIS_ERROR_LIMITS_EXCEEDED;
+    //     }
+    // }
+
+    if(uxQueueMessagesWaiting(handleMoveAxis) < QUEUE_MOVES_LENGTH){
+        xQueueSend(handleMoveAxis,&newMovement,0);
+        printf("Nuevo movimiento agregado a la cola,pendientes: %d\n",uxQueueMessagesWaiting( handleMoveAxis )); 
+        return MOVE_AXIS_OK;
+    }
+    else{
+        return MOVE_AXIS_ERROR_LEN_QUEUE_EXCEEDED;
+    }
 }
 
 static uint16_t vel2us( uint8_t velInPercent){
@@ -330,7 +350,6 @@ void resetAbsPosition(void){
     for(uint8_t indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
         outputMotors.absolutePosition[indexMotor] = 0;
     }
-    printf("clear absolutePosition: %ld, %ld, %ld\n",outputMotors.absolutePosition[0],outputMotors.absolutePosition[1],outputMotors.absolutePosition[2]);
 }
 
 absolute_position_t getAbsPosition(void){

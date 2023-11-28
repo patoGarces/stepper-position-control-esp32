@@ -1,3 +1,7 @@
+#ifndef INC_PAP_POS_CONTROL_H
+#define INC_PAP_POS_CONTROL_H
+
+
 #include "stdint.h"
 
 #define MIN_VELOCITY_US 3000
@@ -21,6 +25,10 @@
 
 #define CANT_MOTORS     3
 
+#define QUEUE_MOVES_LENGTH 100
+
+#define INTERPOLATION_PRECISION     1000.00
+
 enum motor_name {
     MOTOR_A,
     MOTOR_B,
@@ -33,6 +41,13 @@ enum ramp_state {
     RAMP_DOWN,
     RAMP_END
 };
+
+enum move_axis_response {
+    MOVE_AXIS_ERROR_LIMITS_EXCEEDED,
+    MOVE_AXIS_ERROR_LEN_QUEUE_EXCEEDED,
+    MOVE_AXIS_OK,
+};
+
 
 typedef struct{
     uint8_t stepPin;
@@ -63,7 +78,6 @@ typedef struct{
     uint32_t    actualTicks;
 }motor_control_t;
 
-
 typedef struct{
     uint8_t                 motorVelPercent;
     uint8_t                 motorsEnable;
@@ -72,9 +86,9 @@ typedef struct{
 }motors_control_t;
 
 typedef struct{
-    uint16_t actualVelUs;
-    uint16_t targetVelUs;
-    uint16_t dxdt;
+    uint32_t actualVelUs;
+    uint32_t targetVelUs;
+    uint32_t dxdt;
 }individual_ramp_t;
 
 typedef struct{
@@ -92,7 +106,7 @@ typedef struct{
 }absolute_position_t;
 
 void initMotors(pap_position_control_config_t config);
-void moveAxis(int32_t stepsA,int32_t stepsB,int32_t stepsC);
+uint8_t moveAxis(int32_t stepsA,int32_t stepsB,int32_t stepsC);
 void setVel(uint8_t velocity);
 void setEnableMotors(void);
 void setDisableMotors(void);
@@ -100,3 +114,5 @@ uint8_t getVelPercent(void);
 void resetAbsPosition(void);
 absolute_position_t getAbsPosition(void);
 uint8_t areMotorsMoving(void);
+
+#endif 

@@ -1,7 +1,6 @@
 #ifndef INC_PAP_POS_CONTROL_H
 #define INC_PAP_POS_CONTROL_H
 
-
 #include "stdint.h"
 
 #define MIN_VELOCITY_US 3000
@@ -14,20 +13,23 @@
 
 #define BASE_PERIOD_TIMER   10
 
-#define RAMP_MAX_ACCEL 5
+#define RAMP_MAX_ACCEL      5
 
-#define VAL_RAMP_PERCENT 0.1
+#define VAL_RAMP_PERCENT    0.1
 
-// #define AVOID_ACCEL_RAMP 
+#define AVOID_ACCEL_RAMP 
 
-#define MOTOR_ENABLE    0
-#define MOTOR_DISABLE   1
+#define MOTOR_ENABLE        0
+#define MOTOR_DISABLE       1
 
-#define CANT_MOTORS     3
+#define CANT_MOTORS         3
 
-#define QUEUE_MOVES_LENGTH 100
-
+#define QUEUE_MOVES_LENGTH          100
+#define DELAY_BETWEEN_MOVES         10                  // en us
 #define INTERPOLATION_PRECISION     1000.00
+
+// AutoHome
+#define DIRECTION_SEARCH_HOME       0
 
 enum motor_name {
     MOTOR_A,
@@ -55,6 +57,10 @@ typedef struct{
 }output_motor_pins_t;
 
 typedef struct{
+    uint8_t pinSensor[CANT_MOTORS];
+}input_sensor_pins_t;
+
+typedef struct{
     uint8_t             enablePin;
     output_motor_pins_t motors[CANT_MOTORS];
 }output_motors_pins_t;
@@ -65,6 +71,7 @@ typedef struct{
 
 typedef struct{
     output_motors_pins_t    motorsGpio;
+    input_sensor_pins_t     endOfTravelsGpio;
     safety_limits_t         safetyLimits;      
 }pap_position_control_config_t;
 
@@ -114,5 +121,6 @@ uint8_t getVelPercent(void);
 void resetAbsPosition(void);
 absolute_position_t getAbsPosition(void);
 uint8_t areMotorsMoving(void);
+void autoHome(void);
 
 #endif 

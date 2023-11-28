@@ -79,7 +79,7 @@ void errorLimitsExcedeed(uint8_t indexMotor, int32_t actualStep, int32_t safetyL
 
 static void calculateRamp( void ){
     uint8_t indexMotor=0;
-    uint16_t difVelocity=0;
+    uint16_t difVelocity=0;                                                         // TODO: ojo esta variable deberia ser de 32 bits
 
     rampMotors.rampTotalTime = outputMotors.motorsControl[indexMotor].velocityUs * outputMotors.motorsControl[indexMotor].totalSteps;
     rampMotors.rampUpDownTime =  rampMotors.rampTotalTime * VAL_RAMP_PERCENT;
@@ -197,7 +197,7 @@ void calculateInterpolation( void ){
     // ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "%ld, %ld , %ld ",outputMotors.motorsControl[0].velocityUs,outputMotors.motorsControl[1].velocityUs,outputMotors.motorsControl[2].velocityUs);
 }
 
-static void handlerQueueAxis(void *pvParameters){
+static void handlerQueueMoves(void *pvParameters){
 
     motor_control_t receiveNewMovement[3];
     uint8_t indexMotor;
@@ -214,10 +214,9 @@ static void handlerQueueAxis(void *pvParameters){
                 ( void * ) &receiveNewMovement,
                 0)){
 
-                for( indexMotor = 0; indexMotor < 3; indexMotor++ ){
+                for( indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++ ){
                     outputMotors.motorsControl[indexMotor] = receiveNewMovement[indexMotor];
-                    gpio_set_level(hardwareConfig.motorsGpio.motors[indexMotor].dirPin,outputMotors.motorsControl[indexMotor].dir); 
-                    
+                    gpio_set_level(hardwareConfig.motorsGpio.motors[indexMotor].dirPin,outputMotors.motorsControl[indexMotor].dir);    
                 }
 
                 calculateInterpolation();
@@ -231,7 +230,7 @@ static void handlerQueueAxis(void *pvParameters){
                 outputMotors.motorsControl[MOTOR_C].flagRunning = true;   
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(DELAY_BETWEEN_MOVES));
     }
 }
 
@@ -239,11 +238,16 @@ void initMotors(pap_position_control_config_t config){
     uint8_t indexMotor;
 
     hardwareConfig.motorsGpio = config.motorsGpio;
+    hardwareConfig.endOfTravelsGpio = config.endOfTravelsGpio;
 
     gpio_set_direction( hardwareConfig.motorsGpio.enablePin,GPIO_MODE_OUTPUT );
     for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
         gpio_set_direction( hardwareConfig.motorsGpio.motors[indexMotor].dirPin,GPIO_MODE_OUTPUT );
+        gpio_set_level( hardwareConfig.motorsGpio.motors[indexMotor].dirPin,0 );
         gpio_set_direction( hardwareConfig.motorsGpio.motors[indexMotor].stepPin,GPIO_MODE_OUTPUT );
+
+        gpio_set_direction( hardwareConfig.endOfTravelsGpio.pinSensor[indexMotor],GPIO_MODE_INPUT );
+        gpio_set_pull_mode( hardwareConfig.endOfTravelsGpio.pinSensor[indexMotor] , GPIO_PULLUP_ONLY);
 
         hardwareConfig.safetyLimits.safetyLimit[indexMotor] = config.safetyLimits.safetyLimit[indexMotor] * 2;
     }
@@ -277,8 +281,7 @@ void initMotors(pap_position_control_config_t config){
     };
     gptimer_set_alarm_action(handleBaseTimer, &alarm_config);
     
-    xTaskCreate(handlerQueueAxis,"axis Handler",4096,NULL,4,NULL);          // TODO: medir el tamaño de stack consumido
-    resetAbsPosition();
+    xTaskCreate(handlerQueueMoves,"axis Handler",4096,NULL,4,NULL);          // TODO: medir el tamaño de stack consumido
 }
 
 
@@ -363,4 +366,29 @@ absolute_position_t getAbsPosition(void){
 
 uint8_t areMotorsMoving(void){
     return outputMotors.motorsControl[MOTOR_A].flagRunning || outputMotors.motorsControl[MOTOR_B].flagRunning || outputMotors.motorsControl[MOTOR_C].flagRunning;
+}
+
+void autoHome(void){
+    uint8_t indexMotor = 0,toggle=0;
+    
+    // TODO: contemplar que pasa si esta pisado el sensor
+
+    if(outputMotors.motorsEnable == MOTOR_DISABLE){
+        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL,"Motores deshabilitados no se puede realizar el autohome");
+        return;
+    }
+
+    for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
+        outputMotors.motorsControl[indexMotor].dir = DIRECTION_SEARCH_HOME;
+        gpio_set_level(hardwareConfig.motorsGpio.motors[indexMotor].dirPin,outputMotors.motorsControl[indexMotor].dir);
+
+        while( gpio_get_level(hardwareConfig.endOfTravelsGpio.pinSensor[indexMotor]) ){
+
+            gpio_set_level(hardwareConfig.motorsGpio.motors[indexMotor].stepPin,toggle);
+            toggle =! toggle;
+            vTaskDelay(1);
+        }
+
+        outputMotors.absolutePosition[indexMotor] = 0;
+    }
 }

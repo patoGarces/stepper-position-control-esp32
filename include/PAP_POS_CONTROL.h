@@ -32,9 +32,9 @@
 #define DIRECTION_SEARCH_HOME       0
 
 enum motor_name {
-    MOTOR_A,
-    MOTOR_B,
-    MOTOR_C
+    MOTOR_Q1,
+    MOTOR_Q2,
+    MOTOR_Q3
 };
 
 enum ramp_state {
@@ -113,7 +113,7 @@ typedef struct{
 }absolute_position_t;
 
 void initMotors(pap_position_control_config_t config);
-uint8_t moveAxis(int32_t stepsA,int32_t stepsB,int32_t stepsC);
+uint8_t moveAxis(int32_t stepsQ1,int32_t stepsQ2,int32_t stepsQ3);
 void setVel(uint8_t velocity);
 void setEnableMotors(void);
 void setDisableMotors(void);

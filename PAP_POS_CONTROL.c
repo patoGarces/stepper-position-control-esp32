@@ -182,7 +182,7 @@ void calculateInterpolation( void ){
     uint32_t maxSteps = 0;
     uint8_t indexMotor;
 
-    maxSteps = outputMotors.motorsControl[MOTOR_A].totalSteps;
+    maxSteps = outputMotors.motorsControl[MOTOR_Q1].totalSteps;                 // TODO: REVISAR ESTA LOGICA SI Q1 es CERO
     for( indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++ ){ 
         if( outputMotors.motorsControl[indexMotor].totalSteps > maxSteps ){
             maxSteps = outputMotors.motorsControl[indexMotor].totalSteps;
@@ -206,9 +206,9 @@ static void handlerQueueMoves(void *pvParameters){
 
     while(1){
 
-        if( !outputMotors.motorsControl[MOTOR_A].flagRunning &&
-            !outputMotors.motorsControl[MOTOR_B].flagRunning &&
-            !outputMotors.motorsControl[MOTOR_C].flagRunning ) {
+        if( !outputMotors.motorsControl[MOTOR_Q1].flagRunning &&
+            !outputMotors.motorsControl[MOTOR_Q2].flagRunning &&
+            !outputMotors.motorsControl[MOTOR_Q3].flagRunning ) {
              
             if(xQueueReceive( handleMoveAxis,
                 ( void * ) &receiveNewMovement,
@@ -225,9 +225,9 @@ static void handlerQueueMoves(void *pvParameters){
                     calculateRamp();
                 #endif
 
-                outputMotors.motorsControl[MOTOR_A].flagRunning = true;
-                outputMotors.motorsControl[MOTOR_B].flagRunning = true;
-                outputMotors.motorsControl[MOTOR_C].flagRunning = true;   
+                outputMotors.motorsControl[MOTOR_Q1].flagRunning = true;
+                outputMotors.motorsControl[MOTOR_Q2].flagRunning = true;
+                outputMotors.motorsControl[MOTOR_Q3].flagRunning = true;   
             }
         }
         vTaskDelay(pdMS_TO_TICKS(DELAY_BETWEEN_MOVES));
@@ -252,7 +252,7 @@ void initMotors(pap_position_control_config_t config){
         hardwareConfig.safetyLimits.safetyLimit[indexMotor] = config.safetyLimits.safetyLimit[indexMotor] * 2;
     }
 
-    setDisableMotors();
+    setEnableMotors();
 
     gptimer_config_t timerConfig = {
         .clk_src = GPTIMER_CLK_SRC_DEFAULT,
@@ -285,26 +285,26 @@ void initMotors(pap_position_control_config_t config){
 }
 
 
-uint8_t moveAxis(int32_t stepsA,int32_t stepsB,int32_t stepsC){
-    motor_control_t newMovement[3];
+uint8_t moveAxis(int32_t stepsQ1,int32_t stepsQ2,int32_t stepsQ3){             // TODO: acomodar los ejes!
+    motor_control_t newMovement[3];                     
 
-    newMovement[MOTOR_A].dir = stepsA > 0;
-    newMovement[MOTOR_A].totalSteps = abs(stepsA *2);
-    newMovement[MOTOR_A].actualSteps = 0;
-    newMovement[MOTOR_A].velocityUs = vel2us(outputMotors.motorVelPercent);
-    newMovement[MOTOR_A].flagRunning = false;
+    newMovement[MOTOR_Q1].dir = stepsQ1 > 0;
+    newMovement[MOTOR_Q1].totalSteps = abs(stepsQ1 *2);
+    newMovement[MOTOR_Q1].actualSteps = 0;
+    newMovement[MOTOR_Q1].velocityUs = vel2us(outputMotors.motorVelPercent);
+    newMovement[MOTOR_Q1].flagRunning = false;
 
-    newMovement[MOTOR_B].dir = stepsB > 0;
-    newMovement[MOTOR_B].totalSteps = abs(stepsB *2);
-    newMovement[MOTOR_B].actualSteps = 0;
-    newMovement[MOTOR_B].velocityUs = vel2us(outputMotors.motorVelPercent);
-    newMovement[MOTOR_B].flagRunning = false;
+    newMovement[MOTOR_Q2].dir = stepsQ2 > 0;
+    newMovement[MOTOR_Q2].totalSteps = abs(stepsQ2 *2);
+    newMovement[MOTOR_Q2].actualSteps = 0;
+    newMovement[MOTOR_Q2].velocityUs = vel2us(outputMotors.motorVelPercent);
+    newMovement[MOTOR_Q2].flagRunning = false;
 
-    newMovement[MOTOR_C].dir = stepsC > 0;
-    newMovement[MOTOR_C].totalSteps = abs(stepsC *2);
-    newMovement[MOTOR_C].actualSteps = 0;
-    newMovement[MOTOR_C].velocityUs = vel2us(outputMotors.motorVelPercent);
-    newMovement[MOTOR_C].flagRunning = false;
+    newMovement[MOTOR_Q3].dir = stepsQ3 > 0;
+    newMovement[MOTOR_Q3].totalSteps = abs(stepsQ3 *2);
+    newMovement[MOTOR_Q3].actualSteps = 0;
+    newMovement[MOTOR_Q3].velocityUs = vel2us(outputMotors.motorVelPercent);
+    newMovement[MOTOR_Q3].flagRunning = false;
 
     // absolute_position_t actualPosition = getAbsPosition();
     // for(indexMotor=0;indexMotor<CANT_MOTORS;indexMotor++){
@@ -365,7 +365,7 @@ absolute_position_t getAbsPosition(void){
 }
 
 uint8_t areMotorsMoving(void){
-    return outputMotors.motorsControl[MOTOR_A].flagRunning || outputMotors.motorsControl[MOTOR_B].flagRunning || outputMotors.motorsControl[MOTOR_C].flagRunning;
+    return outputMotors.motorsControl[MOTOR_Q1].flagRunning || outputMotors.motorsControl[MOTOR_Q2].flagRunning || outputMotors.motorsControl[MOTOR_Q3].flagRunning;
 }
 
 void autoHome(void){

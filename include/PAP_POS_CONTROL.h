@@ -44,10 +44,11 @@ enum ramp_state {
     RAMP_END
 };
 
-enum move_axis_response {
-    MOVE_AXIS_ERROR_LIMITS_EXCEEDED,
-    MOVE_AXIS_ERROR_LEN_QUEUE_EXCEEDED,
-    MOVE_AXIS_OK,
+enum callback_error_responses {
+    ERROR_LEN_QUEUE_EXCEEDED,
+    ERROR_AUTOHOME_WITH_MOTORS_DISABLED,
+    ERROR_SAFETY_LIMITS_EXCEDEED,
+    ERROR_MOVE_AXIS_WITH_MOTORES_DISABLED,
 };
 
 
@@ -73,6 +74,7 @@ typedef struct{
     output_motors_pins_t    motorsGpio;
     input_sensor_pins_t     endOfTravelsGpio;
     safety_limits_t         safetyLimits;      
+    void*                   callbackErrorPointer;
 }pap_position_control_config_t;
 
 typedef struct{
@@ -86,10 +88,10 @@ typedef struct{
 }motor_control_t;
 
 typedef struct{
-    uint8_t                 motorVelPercent;
-    uint8_t                 motorsEnable;
-    int32_t                 absolutePosition[CANT_MOTORS];
-    motor_control_t         motorsControl[CANT_MOTORS];
+    uint8_t             motorVelPercent;
+    uint8_t             motorsEnable;
+    int32_t             absolutePosition[CANT_MOTORS];
+    motor_control_t     motorsControl[CANT_MOTORS];
 }motors_control_t;
 
 typedef struct{
@@ -113,7 +115,7 @@ typedef struct{
 }absolute_position_t;
 
 void initMotors(pap_position_control_config_t config);
-uint8_t moveAxis(int32_t stepsQ1,int32_t stepsQ2,int32_t stepsQ3);
+void moveAxis(int32_t stepsQ1,int32_t stepsQ2,int32_t stepsQ3);
 void setVel(uint8_t velocity);
 void setEnableMotors(void);
 void setDisableMotors(void);
@@ -122,5 +124,6 @@ void resetAbsPosition(void);
 absolute_position_t getAbsPosition(void);
 uint8_t areMotorsMoving(void);
 void autoHome(void);
+void stopEmergency(void);
 
 #endif 

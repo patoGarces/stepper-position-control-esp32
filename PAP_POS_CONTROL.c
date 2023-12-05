@@ -294,8 +294,9 @@ void initMotors(pap_position_control_config_t config){
     xTaskCreate(handlerQueueMovesTask, "axis Handler", 4096, NULL, 4, NULL); // TODO: medir el tamaño de stack consumido
 }
 
-void moveAxis(int32_t stepsQ1, int32_t stepsQ2, int32_t stepsQ3){
+void moveAxis(int32_t stepsQ1, int32_t stepsQ2, int32_t stepsQ3,uint8_t enableRelativePosition){
     motor_control_t newMovement[3];
+    int32_t travelAxis[3];
 
     if (outputMotors.motorsEnable == MOTOR_DISABLE){
         ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "Motores deshabilitados no se puede realizar el moveAxis");
@@ -303,20 +304,36 @@ void moveAxis(int32_t stepsQ1, int32_t stepsQ2, int32_t stepsQ3){
         return;
     }
 
-    newMovement[MOTOR_Q1].dir = stepsQ1 > 0;
-    newMovement[MOTOR_Q1].totalSteps = abs(stepsQ1 * 2);
+    if(enableRelativePosition){
+        printf("Pasos absolutos: %ld,%ld,%ld\n", outputMotors.absolutePosition[MOTOR_Q1], outputMotors.absolutePosition[MOTOR_Q2], outputMotors.absolutePosition[MOTOR_Q3]);
+        printf("Posicion a la que quiero llegar: %ld,%ld,%ld\n", stepsQ1*2,stepsQ2*2,stepsQ3*2);
+
+        travelAxis[MOTOR_Q1] = stepsQ1 * 2 - outputMotors.absolutePosition[MOTOR_Q1];
+        travelAxis[MOTOR_Q2] = stepsQ2 * 2 - outputMotors.absolutePosition[MOTOR_Q2];
+        travelAxis[MOTOR_Q3] = stepsQ3 * 2 - outputMotors.absolutePosition[MOTOR_Q3];
+
+        printf("Pasos relativos: %ld,%ld,%ld\n", travelAxis[MOTOR_Q1],travelAxis[MOTOR_Q2],travelAxis[MOTOR_Q3]);
+    }
+    else{
+        travelAxis[MOTOR_Q1] = stepsQ1 * 2;
+        travelAxis[MOTOR_Q2] = stepsQ2 * 2;
+        travelAxis[MOTOR_Q3] = stepsQ3 * 2;
+    }
+
+    newMovement[MOTOR_Q1].dir = travelAxis[MOTOR_Q1] > 0;
+    newMovement[MOTOR_Q1].totalSteps = abs(travelAxis[MOTOR_Q1]);
     newMovement[MOTOR_Q1].actualSteps = 0;
     newMovement[MOTOR_Q1].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_Q1].flagRunning = false;
 
-    newMovement[MOTOR_Q2].dir = stepsQ2 > 0;
-    newMovement[MOTOR_Q2].totalSteps = abs(stepsQ2 * 2);
+    newMovement[MOTOR_Q2].dir = travelAxis[MOTOR_Q2] > 0;
+    newMovement[MOTOR_Q2].totalSteps = abs(travelAxis[MOTOR_Q2]);
     newMovement[MOTOR_Q2].actualSteps = 0;
     newMovement[MOTOR_Q2].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_Q2].flagRunning = false;
 
-    newMovement[MOTOR_Q3].dir = stepsQ3 > 0;
-    newMovement[MOTOR_Q3].totalSteps = abs(stepsQ3 * 2);
+    newMovement[MOTOR_Q3].dir = travelAxis[MOTOR_Q3] > 0;
+    newMovement[MOTOR_Q3].totalSteps = abs(travelAxis[MOTOR_Q3]);
     newMovement[MOTOR_Q3].actualSteps = 0;
     newMovement[MOTOR_Q3].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_Q3].flagRunning = false;
@@ -389,7 +406,7 @@ static void handlerAutoHomeTask(void *pvParameters){
     if (outputMotors.motorsEnable == MOTOR_DISABLE){
         ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "Motores deshabilitados no se puede realizar el autohome");
         callbackError(ERROR_AUTOHOME_WITH_MOTORS_DISABLED);
-        return;
+        vTaskDelete(NULL);
     }
 
     ESP_ERROR_CHECK(gptimer_stop(handleBaseTimer));

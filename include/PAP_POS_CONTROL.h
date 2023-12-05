@@ -115,7 +115,7 @@ typedef struct{
 }absolute_position_t;
 
 void initMotors(pap_position_control_config_t config);
-void moveAxis(int32_t stepsQ1,int32_t stepsQ2,int32_t stepsQ3);
+void moveAxis(int32_t stepsQ1, int32_t stepsQ2, int32_t stepsQ3,uint8_t enableRelativePosition);
 void setVel(uint8_t velocity);
 void setEnableMotors(void);
 void setDisableMotors(void);

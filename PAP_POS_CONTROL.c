@@ -186,7 +186,7 @@ void calculateInterpolation(void){
     uint32_t maxSteps = 0;
     uint8_t indexMotor;
 
-    maxSteps = outputMotors.motorsControl[MOTOR_Q1].totalSteps; // TODO: REVISAR ESTA LOGICA SI Q1 es CERO
+    maxSteps = outputMotors.motorsControl[MOTOR_Q1].totalSteps;
     for (indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++){
         if (outputMotors.motorsControl[indexMotor].totalSteps > maxSteps){
             maxSteps = outputMotors.motorsControl[indexMotor].totalSteps;
@@ -291,7 +291,7 @@ void initMotors(pap_position_control_config_t config){
     };
     gptimer_set_alarm_action(handleBaseTimer, &alarm_config);
 
-    xTaskCreate(handlerQueueMovesTask, "axis Handler", 4096, NULL, 4, NULL); // TODO: medir el tamaño de stack consumido
+    xTaskCreate(handlerQueueMovesTask, "axis Handler", 2048, NULL, 4, NULL);
 }
 
 void moveAxis(int32_t stepsQ1, int32_t stepsQ2, int32_t stepsQ3,uint8_t enableRelativePosition){
@@ -451,7 +451,7 @@ static void handlerAutoHomeTask(void *pvParameters){
 
 
 void autoHome(void){
-    xTaskCreate(handlerAutoHomeTask, "autoHome Handler", 4096, NULL, 4, NULL); // TODO: medir el tamaño de stack consumido
+    xTaskCreate(handlerAutoHomeTask, "autoHome Handler", 2048, NULL, 4, NULL);
 }
 
 void stopEmergency(void){

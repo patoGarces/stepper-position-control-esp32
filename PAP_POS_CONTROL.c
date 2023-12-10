@@ -17,6 +17,7 @@ control_ramp_t rampMotors;
 gptimer_handle_t handleBaseTimer = NULL;
 
 uint8_t flagErrorLimits = false;
+uint8_t enableRelativePos = false;
 
 // TODO: bug: a alta velocidad el motor de mayor recorrido no se mueve
 
@@ -204,6 +205,7 @@ void calculateInterpolation(void){
 static void handlerQueueMovesTask(void *pvParameters){
     motor_control_t receiveNewMovement[3];
     uint8_t indexMotor;
+    int32_t travelAxis[3];
 
     handleMoveAxis = xQueueCreate(QUEUE_MOVES_LENGTH, sizeof(motors_control_t));
 
@@ -217,16 +219,35 @@ static void handlerQueueMovesTask(void *pvParameters){
                               (void *)&receiveNewMovement,
                               0)){
 
+
+
                 for (indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++){
+
                     outputMotors.motorsControl[indexMotor] = receiveNewMovement[indexMotor];
-                    gpio_set_level(hardwareConfig.motorsGpio.motors[indexMotor].dirPin, outputMotors.motorsControl[indexMotor].dir);
+
+                    if(enableRelativePos){
+                        printf("Pasos absolutos mot %d: %ld\n",indexMotor, outputMotors.absolutePosition[indexMotor]);
+                        printf("Posicion a la que quiero llegar: %ld\n", receiveNewMovement[indexMotor].totalSteps *2);
+
+                        travelAxis[indexMotor] = receiveNewMovement[indexMotor].totalSteps * 2 - outputMotors.absolutePosition[indexMotor];
+
+                        printf("Pasos relativos: %ld\n", travelAxis[indexMotor]);
+                    }
+                    else{
+                        travelAxis[indexMotor] = receiveNewMovement[indexMotor].totalSteps * 2;
+                    }
+
+                    gpio_set_level(hardwareConfig.motorsGpio.motors[indexMotor].dirPin, outputMotors.motorsControl[indexMotor].dir); 
+                
+                    outputMotors.motorsControl[indexMotor].dir = travelAxis[indexMotor] > 0;
+                    outputMotors.motorsControl[indexMotor].totalSteps = abs(travelAxis[indexMotor]);
                 }
 
                 calculateInterpolation();
 
-#ifndef AVOID_ACCEL_RAMP
+            #ifndef AVOID_ACCEL_RAMP
                 calculateRamp();
-#endif
+            #endif
 
                 outputMotors.motorsControl[MOTOR_Q1].flagRunning = true;
                 outputMotors.motorsControl[MOTOR_Q2].flagRunning = true;
@@ -249,6 +270,8 @@ void initMotors(pap_position_control_config_t config){
 
     hardwareConfig.motorsGpio = config.motorsGpio;
     hardwareConfig.endOfTravelsGpio = config.endOfTravelsGpio;
+
+    enableRelativePos = config.relativePos;
 
     gpio_set_direction(hardwareConfig.motorsGpio.enablePin, GPIO_MODE_OUTPUT);
     for (indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++){
@@ -294,9 +317,9 @@ void initMotors(pap_position_control_config_t config){
     xTaskCreate(handlerQueueMovesTask, "axis Handler", 2048, NULL, 4, NULL);
 }
 
-void moveAxis(int32_t stepsQ1, int32_t stepsQ2, int32_t stepsQ3,uint8_t enableRelativePosition){
+void moveAxis(int32_t stepsQ1, int32_t stepsQ2, int32_t stepsQ3){
     motor_control_t newMovement[3];
-    int32_t travelAxis[3];
+
 
     if (outputMotors.motorsEnable == MOTOR_DISABLE){
         ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "Motores deshabilitados no se puede realizar el moveAxis");
@@ -304,36 +327,20 @@ void moveAxis(int32_t stepsQ1, int32_t stepsQ2, int32_t stepsQ3,uint8_t enableRe
         return;
     }
 
-    if(enableRelativePosition){
-        printf("Pasos absolutos: %ld,%ld,%ld\n", outputMotors.absolutePosition[MOTOR_Q1], outputMotors.absolutePosition[MOTOR_Q2], outputMotors.absolutePosition[MOTOR_Q3]);
-        printf("Posicion a la que quiero llegar: %ld,%ld,%ld\n", stepsQ1*2,stepsQ2*2,stepsQ3*2);
-
-        travelAxis[MOTOR_Q1] = stepsQ1 * 2 - outputMotors.absolutePosition[MOTOR_Q1];
-        travelAxis[MOTOR_Q2] = stepsQ2 * 2 - outputMotors.absolutePosition[MOTOR_Q2];
-        travelAxis[MOTOR_Q3] = stepsQ3 * 2 - outputMotors.absolutePosition[MOTOR_Q3];
-
-        printf("Pasos relativos: %ld,%ld,%ld\n", travelAxis[MOTOR_Q1],travelAxis[MOTOR_Q2],travelAxis[MOTOR_Q3]);
-    }
-    else{
-        travelAxis[MOTOR_Q1] = stepsQ1 * 2;
-        travelAxis[MOTOR_Q2] = stepsQ2 * 2;
-        travelAxis[MOTOR_Q3] = stepsQ3 * 2;
-    }
-
-    newMovement[MOTOR_Q1].dir = travelAxis[MOTOR_Q1] > 0;
-    newMovement[MOTOR_Q1].totalSteps = abs(travelAxis[MOTOR_Q1]);
+    newMovement[MOTOR_Q1].dir = stepsQ1 > 0;
+    newMovement[MOTOR_Q1].totalSteps = abs(stepsQ1);
     newMovement[MOTOR_Q1].actualSteps = 0;
     newMovement[MOTOR_Q1].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_Q1].flagRunning = false;
 
-    newMovement[MOTOR_Q2].dir = travelAxis[MOTOR_Q2] > 0;
-    newMovement[MOTOR_Q2].totalSteps = abs(travelAxis[MOTOR_Q2]);
+    newMovement[MOTOR_Q2].dir = stepsQ2 > 0;
+    newMovement[MOTOR_Q2].totalSteps = abs(stepsQ2);
     newMovement[MOTOR_Q2].actualSteps = 0;
     newMovement[MOTOR_Q2].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_Q2].flagRunning = false;
 
-    newMovement[MOTOR_Q3].dir = travelAxis[MOTOR_Q3] > 0;
-    newMovement[MOTOR_Q3].totalSteps = abs(travelAxis[MOTOR_Q3]);
+    newMovement[MOTOR_Q3].dir = stepsQ3 > 0;
+    newMovement[MOTOR_Q3].totalSteps = abs(stepsQ3);
     newMovement[MOTOR_Q3].actualSteps = 0;
     newMovement[MOTOR_Q3].velocityUs = vel2us(outputMotors.motorVelPercent);
     newMovement[MOTOR_Q3].flagRunning = false;
@@ -403,11 +410,7 @@ uint8_t areMotorsMoving(void){
 static void handlerAutoHomeTask(void *pvParameters){
     uint8_t indexMotor = 0, toggle = 0;
 
-    if (outputMotors.motorsEnable == MOTOR_DISABLE){
-        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "Motores deshabilitados no se puede realizar el autohome");
-        callbackError(ERROR_AUTOHOME_WITH_MOTORS_DISABLED);
-        vTaskDelete(NULL);
-    }
+    setEnableMotors();
 
     ESP_ERROR_CHECK(gptimer_stop(handleBaseTimer));
 
@@ -421,7 +424,7 @@ static void handlerAutoHomeTask(void *pvParameters){
             toggle = !toggle;
 
             if( !outputMotors.motorsControl[indexMotor].flagRunning ){
-                vTaskDelete(NULL);
+                vTaskDelete(NULL);   // TODO: revisar esta logica
             }
             vTaskDelay(1);
         }

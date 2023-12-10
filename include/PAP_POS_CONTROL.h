@@ -46,7 +46,6 @@ enum ramp_state {
 
 enum callback_error_responses {
     ERROR_LEN_QUEUE_EXCEEDED,
-    ERROR_AUTOHOME_WITH_MOTORS_DISABLED,
     ERROR_SAFETY_LIMITS_EXCEDEED,
     ERROR_MOVE_AXIS_WITH_MOTORES_DISABLED,
 };
@@ -71,6 +70,7 @@ typedef struct{
 }safety_limits_t;
 
 typedef struct{
+    uint8_t relativePos;
     output_motors_pins_t    motorsGpio;
     input_sensor_pins_t     endOfTravelsGpio;
     safety_limits_t         safetyLimits;      
@@ -115,7 +115,7 @@ typedef struct{
 }absolute_position_t;
 
 void initMotors(pap_position_control_config_t config);
-void moveAxis(int32_t stepsQ1, int32_t stepsQ2, int32_t stepsQ3,uint8_t enableRelativePosition);
+void moveAxis(int32_t stepsQ1, int32_t stepsQ2, int32_t stepsQ3);
 void setVel(uint8_t velocity);
 void setEnableMotors(void);
 void setDisableMotors(void);

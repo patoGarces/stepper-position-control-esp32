@@ -196,7 +196,7 @@ void calculateInterpolation(void){
 
     for (indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++){
         outputMotors.motorsControl[indexMotor].velocityUs = (uint32_t)((maxSteps * vel2us(outputMotors.motorVelPercent)) / (float)outputMotors.motorsControl[indexMotor].totalSteps);
-        ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "INTERPOLATION: MaxSteps: %ld, totalSteps: %ld, vel: %ldus", maxSteps, outputMotors.motorsControl[indexMotor].totalSteps, outputMotors.motorsControl[indexMotor].velocityUs);
+        // ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "INTERPOLATION: MaxSteps: %ld, totalSteps: %ld, vel: %ldus", maxSteps, outputMotors.motorsControl[indexMotor].totalSteps, outputMotors.motorsControl[indexMotor].velocityUs);
     }
     // outputMotors.motorsControl[indexMax].velocityUs *= 0.95;            // el motor de mayor recorrido lo acelero un poco mas
     // ESP_DRAM_LOGE(PAP_POS_CONTROL_TAL, "%ld, %ld , %ld ",outputMotors.motorsControl[0].velocityUs,outputMotors.motorsControl[1].velocityUs,outputMotors.motorsControl[2].velocityUs);
@@ -219,29 +219,25 @@ static void handlerQueueMovesTask(void *pvParameters){
                               (void *)&receiveNewMovement,
                               0)){
 
-
-
                 for (indexMotor = 0; indexMotor < CANT_MOTORS; indexMotor++){
 
                     outputMotors.motorsControl[indexMotor] = receiveNewMovement[indexMotor];
 
                     if(enableRelativePos){
-                        printf("Pasos absolutos mot %d: %ld\n",indexMotor, outputMotors.absolutePosition[indexMotor]);
-                        printf("Posicion a la que quiero llegar: %ld\n", receiveNewMovement[indexMotor].totalSteps *2);
-
+                
                         travelAxis[indexMotor] = receiveNewMovement[indexMotor].totalSteps * 2 - outputMotors.absolutePosition[indexMotor];
-
-                        printf("Pasos relativos: %ld\n", travelAxis[indexMotor]);
+                        printf("Pasos absolutos mot %d: %ld, a donde quiero llegar: %ld , pasos relativos: %ld\n",indexMotor, outputMotors.absolutePosition[indexMotor], receiveNewMovement[indexMotor].totalSteps *2,travelAxis[indexMotor]);
                     }
                     else{
                         travelAxis[indexMotor] = receiveNewMovement[indexMotor].totalSteps * 2;
                     }
 
-                    gpio_set_level(hardwareConfig.motorsGpio.motors[indexMotor].dirPin, outputMotors.motorsControl[indexMotor].dir); 
-                
                     outputMotors.motorsControl[indexMotor].dir = travelAxis[indexMotor] > 0;
+                    gpio_set_level(hardwareConfig.motorsGpio.motors[indexMotor].dirPin, outputMotors.motorsControl[indexMotor].dir); 
                     outputMotors.motorsControl[indexMotor].totalSteps = abs(travelAxis[indexMotor]);
                 }
+
+                printf("\n\n");
 
                 calculateInterpolation();
 

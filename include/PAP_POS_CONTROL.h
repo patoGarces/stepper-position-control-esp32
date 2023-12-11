@@ -25,7 +25,7 @@
 #define CANT_MOTORS         3
 
 #define QUEUE_MOVES_LENGTH          100
-#define DELAY_BETWEEN_MOVES         10                  // en us
+#define DELAY_BETWEEN_MOVES         200                  // en us
 #define INTERPOLATION_PRECISION     1000.00
 
 // AutoHome
